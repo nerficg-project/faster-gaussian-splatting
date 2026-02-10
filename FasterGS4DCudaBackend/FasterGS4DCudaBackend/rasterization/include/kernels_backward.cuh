@@ -13,19 +13,27 @@ namespace cg = cooperative_groups;
 namespace faster_gs::rasterization::kernels::backward {
 
     __global__ void preprocess_backward_cu(
-        const float3* __restrict__ means,
-        const float3* __restrict__ scales,
-        const float4* __restrict__ rotations,
+        const float3* __restrict__ spatial_means,
+        const float* __restrict__ temporal_means,
+        const float3* __restrict__ spatial_scales,
+        const float* __restrict__ temporal_scales,
+        const float4* __restrict__ left_isoclinic_rotations,
+        const float4* __restrict__ right_isoclinic_rotations,
         const float* __restrict__ opacities,
         const float3* __restrict__ sh_coefficients_rest,
         const float4* __restrict__ w2c,
         const float3* __restrict__ cam_position,
         const uint* __restrict__ primitive_n_touched_tiles,
+        const float* __restrict__ primitive_cov3d,
+        const float* __restrict__ primitive_mean3d,
         const float2* __restrict__ grad_mean2d,
         const float* __restrict__ grad_conic,
-        float3* __restrict__ grad_means,
-        float3* __restrict__ grad_scales,
-        float4* __restrict__ grad_rotations,
+        float3* __restrict__ grad_spatial_means,
+        float* __restrict__ grad_temporal_means,
+        float3* __restrict__ grad_spatial_scales,
+        float* __restrict__ grad_temporal_scales,
+        float4* __restrict__ grad_left_isoclinic_rotations,
+        float4* __restrict__ grad_right_isoclinic_rotations,
         float* __restrict__ grad_opacities,
         float3* __restrict__ grad_sh_coefficients_0,
         float3* __restrict__ grad_sh_coefficients_rest,
@@ -39,19 +47,26 @@ namespace faster_gs::rasterization::kernels::backward {
         const float focal_y,
         const float center_x,
         const float center_y,
-        const bool proper_antialiasing)
+        const float timestamp)
     {
         const uint primitive_idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (primitive_idx >= n_primitives || primitive_n_touched_tiles[primitive_idx] == 0) return;
 
-        // load 3d mean
-        const float3 mean3d = means[primitive_idx];
+        // load spatial 3d mean
+        const float3 spatial_mean3d = spatial_means[primitive_idx]; // original paper uses spatial mean3d in the forward pass but the conditional mean3d here
 
         // sh evaluation backward
         const float3 dL_dmean3d_from_color = convert_sh_to_color_backward(
             sh_coefficients_rest, grad_sh_coefficients_0, grad_sh_coefficients_rest,
-            mean3d, cam_position[0], primitive_idx,
+            spatial_mean3d, cam_position[0], primitive_idx, // TODO: this could be the conditional mean3d instead
             active_sh_bases, total_sh_bases
+        );
+
+        // load 3d mean
+        const float3 mean3d = make_float3(
+            primitive_mean3d[primitive_idx],
+            primitive_mean3d[n_primitives + primitive_idx],
+            primitive_mean3d[2 * n_primitives + primitive_idx]
         );
 
         const float4 w2c_r3 = w2c[2];
@@ -60,26 +75,6 @@ namespace faster_gs::rasterization::kernels::backward {
         const float x = (w2c_r1.x * mean3d.x + w2c_r1.y * mean3d.y + w2c_r1.z * mean3d.z + w2c_r1.w) / depth;
         const float4 w2c_r2 = w2c[1];
         const float y = (w2c_r2.x * mean3d.x + w2c_r2.y * mean3d.y + w2c_r2.z * mean3d.z + w2c_r2.w) / depth;
-
-        // compute 3d covariance from scale and rotation
-        const float3 raw_scale = scales[primitive_idx];
-        const float3 variance = expf(2.0f * raw_scale);
-        const float4 raw_rotation = rotations[primitive_idx];
-        float quaternion_norm_sq = 1.0f;
-        const mat3x3 R = convert_quaternion_to_rotation_matrix(raw_rotation, quaternion_norm_sq);
-        const mat3x3 RSS = {
-            R.m11 * variance.x, R.m12 * variance.y, R.m13 * variance.z,
-            R.m21 * variance.x, R.m22 * variance.y, R.m23 * variance.z,
-            R.m31 * variance.x, R.m32 * variance.y, R.m33 * variance.z
-        };
-        const mat3x3_triu cov3d {
-            RSS.m11 * R.m11 + RSS.m12 * R.m12 + RSS.m13 * R.m13,
-            RSS.m11 * R.m21 + RSS.m12 * R.m22 + RSS.m13 * R.m23,
-            RSS.m11 * R.m31 + RSS.m12 * R.m32 + RSS.m13 * R.m33,
-            RSS.m21 * R.m21 + RSS.m22 * R.m22 + RSS.m23 * R.m23,
-            RSS.m21 * R.m31 + RSS.m22 * R.m32 + RSS.m23 * R.m33,
-            RSS.m31 * R.m31 + RSS.m32 * R.m32 + RSS.m33 * R.m33,
-        };
 
         // ewa splatting gradient helpers
         const float clip_left = (-0.15f * width - center_x) / focal_x;
@@ -102,6 +97,14 @@ namespace faster_gs::rasterization::kernels::backward {
             j22 * w2c_r2.y + j23 * w2c_r3.y,
             j22 * w2c_r2.z + j23 * w2c_r3.z
         );
+        const mat3x3_triu cov3d = {
+            primitive_cov3d[primitive_idx],
+            primitive_cov3d[n_primitives + primitive_idx],
+            primitive_cov3d[2 * n_primitives + primitive_idx],
+            primitive_cov3d[3 * n_primitives + primitive_idx],
+            primitive_cov3d[4 * n_primitives + primitive_idx],
+            primitive_cov3d[5 * n_primitives + primitive_idx],
+        };
         const float3 jwc_r1 = make_float3(
             jw_r1.x * cov3d.m11 + jw_r1.y * cov3d.m12 + jw_r1.z * cov3d.m13,
             jw_r1.x * cov3d.m12 + jw_r1.y * cov3d.m22 + jw_r1.z * cov3d.m23,
@@ -114,11 +117,13 @@ namespace faster_gs::rasterization::kernels::backward {
         );
 
         // 2d covariance gradient
-        const float a_raw = dot(jwc_r1, jw_r1), b = dot(jwc_r1, jw_r2), c_raw = dot(jwc_r2, jw_r2);
-        const float kernel_size = proper_antialiasing ? config::dilation_proper_antialiasing : config::dilation;
-        const float a = a_raw + kernel_size, c = c_raw + kernel_size;
-        const float aa = a * a, bb = b * b, cc = c * c;
-        const float ac = a * c, ab = a * b, bc = b * c;
+        const float3 cov2d = make_float3(
+            dot(jwc_r1, jw_r1) + config::dilation,
+            dot(jwc_r1, jw_r2),
+            dot(jwc_r2, jw_r2) + config::dilation
+        );
+        const float aa = cov2d.x * cov2d.x, bb = cov2d.y * cov2d.y, cc = cov2d.z * cov2d.z;
+        const float ac = cov2d.x * cov2d.z, ab = cov2d.x * cov2d.y, bc = cov2d.y * cov2d.z;
         const float determinant = ac - bb;
         const float determinant_sq = determinant * determinant;
         const float determinant_rcp_sq = 1.0f / determinant_sq;
@@ -127,37 +132,11 @@ namespace faster_gs::rasterization::kernels::backward {
             grad_conic[n_primitives + primitive_idx],
             grad_conic[2 * n_primitives + primitive_idx]
         );
-        float3 dL_dcov2d = determinant_rcp_sq * make_float3(
+        const float3 dL_dcov2d = determinant_rcp_sq * make_float3(
             2.0f * bc * dL_dconic.y - cc * dL_dconic.x - bb * dL_dconic.z,
             bc * dL_dconic.x - (ac + bb) * dL_dconic.y + ab * dL_dconic.z,
             2.0f * ab * dL_dconic.y - bb * dL_dconic.x - aa * dL_dconic.z
         );
-
-        // account for proper antialiasing
-        if (proper_antialiasing) {
-            const float opacity = sigmoid(opacities[primitive_idx]);
-            const float dL_dopacity_conv_factor = grad_opacities[primitive_idx];
-            const float determinant_raw = a_raw * c_raw - bb;
-            const float radicand = fmaxf(determinant_raw / determinant, 0.0f);
-            const float conv_factor = sqrtf(radicand);
-            const float dL_dopacity = dL_dopacity_conv_factor * conv_factor * opacity * (1.0f - opacity);
-            grad_opacities[primitive_idx] = dL_dopacity;
-            // the remaining part works but causes exploding gradients that lead to lots of degenerate Gaussians
-            if constexpr (!config::detach_dilation_proper_antialiasing_from_cov2d) {
-                // based on https://github.com/nerfstudio-project/gsplat/blob/65042cc501d1cdbefaf1d6f61a9a47575eec8c71/gsplat/cuda/include/Utils.cuh#L390
-                const float3 conic = make_float3(
-                    c / determinant,
-                    -b / determinant,
-                    a / determinant
-                );
-                const float determinant_conic = conic.x * conic.z - conic.y * conic.y;
-                const float dL_dradicand = dL_dopacity_conv_factor * opacity / fmaxf(2.0f * conv_factor, 1e-6f);
-                const float one_minus_radicand = 1.0f - radicand;
-                dL_dcov2d.x += dL_dradicand * (one_minus_radicand * conic.x - kernel_size * determinant_conic);
-                dL_dcov2d.y += dL_dradicand * 2.0f * one_minus_radicand * conic.y;
-                dL_dcov2d.z += dL_dradicand * (one_minus_radicand * conic.z - kernel_size * determinant_conic);
-            }
-        }
 
         // 3d covariance gradient
         const mat3x3_triu dL_dcov3d = {
@@ -225,34 +204,207 @@ namespace faster_gs::rasterization::kernels::backward {
 
         // write total 3d mean gradient
         const float3 dL_dmean3d = dL_dmean3d_from_splatting + dL_dmean3d_from_color;
-        grad_means[primitive_idx] = dL_dmean3d;
+        grad_spatial_means[primitive_idx] = dL_dmean3d;
+
+        // compute conditional 3d gaussian
+        const float4 raw_left_isoclinic_rotation = left_isoclinic_rotations[primitive_idx];
+        const float left_norm_sqrt_rcp = rsqrtf(dot(raw_left_isoclinic_rotation, raw_left_isoclinic_rotation));
+        auto [a, b, c, d] = raw_left_isoclinic_rotation * left_norm_sqrt_rcp;
+        const float4 raw_right_isoclinic_rotation = right_isoclinic_rotations[primitive_idx];
+        const float right_norm_sqrt_rcp = rsqrtf(dot(raw_right_isoclinic_rotation, raw_right_isoclinic_rotation));
+        auto [p, q, r, s] = raw_right_isoclinic_rotation * right_norm_sqrt_rcp;
+        const mat4x4 R = {
+            a*p - b*q - c*r - d*s, -a*q - b*p + c*s - d*r, -a*r - b*s - c*p + d*q, -a*s + b*r - c*q - d*p,
+            a*q + b*p + c*s - d*r, a*p - b*q + c*r + d*s, a*s - b*r - c*q - d*p, -a*r - b*s + c*p - d*q,
+            a*r - b*s + c*p + d*q, -a*s - b*r - c*q + d*p, a*p + b*q - c*r + d*s, a*q - b*p - c*s - d*r,
+            a*s + b*r - c*q + d*p, a*r - b*s - c*p - d*q, -a*q + b*p - c*s - d*r, a*p + b*q + c*r - d*s
+        };
+        const float3 raw_spatial_scale = spatial_scales[primitive_idx];
+        const float raw_temporal_scale = temporal_scales[primitive_idx];
+        const float4 raw_scale = make_float4(raw_spatial_scale.x, raw_spatial_scale.y, raw_spatial_scale.z, raw_temporal_scale);
+        const float4 variance = expf(2.0f * raw_scale);
+        const mat4x4 RSS = {
+            R.m11 * variance.x, R.m12 * variance.y, R.m13 * variance.z, R.m14 * variance.w,
+            R.m21 * variance.x, R.m22 * variance.y, R.m23 * variance.z, R.m24 * variance.w,
+            R.m31 * variance.x, R.m32 * variance.y, R.m33 * variance.z, R.m34 * variance.w,
+            R.m41 * variance.x, R.m42 * variance.y, R.m43 * variance.z, R.m44 * variance.w
+        };
+        // TODO: not all of these are used here
+        const mat4x4_triu cov4d = {
+            RSS.m11 * R.m11 + RSS.m12 * R.m12 + RSS.m13 * R.m13 + RSS.m14 * R.m14,
+            RSS.m11 * R.m21 + RSS.m12 * R.m22 + RSS.m13 * R.m23 + RSS.m14 * R.m24,
+            RSS.m11 * R.m31 + RSS.m12 * R.m32 + RSS.m13 * R.m33 + RSS.m14 * R.m34,
+            RSS.m11 * R.m41 + RSS.m12 * R.m42 + RSS.m13 * R.m43 + RSS.m14 * R.m44,
+            RSS.m21 * R.m21 + RSS.m22 * R.m22 + RSS.m23 * R.m23 + RSS.m24 * R.m24,
+            RSS.m21 * R.m31 + RSS.m22 * R.m32 + RSS.m23 * R.m33 + RSS.m24 * R.m34,
+            RSS.m21 * R.m41 + RSS.m22 * R.m42 + RSS.m23 * R.m43 + RSS.m24 * R.m44,
+            RSS.m31 * R.m31 + RSS.m32 * R.m32 + RSS.m33 * R.m33 + RSS.m34 * R.m34,
+            RSS.m31 * R.m41 + RSS.m32 * R.m42 + RSS.m33 * R.m43 + RSS.m34 * R.m44,
+            RSS.m41 * R.m41 + RSS.m42 * R.m42 + RSS.m43 * R.m43 + RSS.m44 * R.m44
+        };
+        const float temporal_mean = temporal_means[primitive_idx];
+        const float delta_t = timestamp - temporal_mean;
+        const float conv4d_m44_rcp = 1.0f / cov4d.m44;
+        const float marginal_t = expf(-0.5f * delta_t * delta_t * conv4d_m44_rcp);
+
+        // opacity and marginal_t gradient
+        const float raw_opacity = opacities[primitive_idx];
+        const float opacity = sigmoid(raw_opacity);
+        const float dL_dopacity_marginal_t = grad_opacities[primitive_idx];
+        const float dL_dopacity = dL_dopacity_marginal_t * marginal_t * opacity * (1.0f - opacity);
+        grad_opacities[primitive_idx] = dL_dopacity;
+        const float dL_dmarginal_t = dL_dopacity_marginal_t * opacity;
+
+        // temporal_mean and cov4d.m44 gradient from marginal_t
+        const float dL_dtemporal_mean_from_marginal_t = dL_dmarginal_t * marginal_t * delta_t * conv4d_m44_rcp;
+        const float dL_dcov4d_m44_from_marginal_t = dL_dmarginal_t * marginal_t * 0.5f * delta_t * delta_t * conv4d_m44_rcp * conv4d_m44_rcp;
+
+        // temporal_mean and cov4d gradient from conditional 3d mean
+        const float dL_dcov4d_m14_from_mean3d = dL_dmean3d_from_splatting.x * delta_t * conv4d_m44_rcp;
+        const float dL_dcov4d_m24_from_mean3d = dL_dmean3d_from_splatting.y * delta_t * conv4d_m44_rcp;
+        const float dL_dcov4d_m34_from_mean3d = dL_dmean3d_from_splatting.z * delta_t * conv4d_m44_rcp;
+        const float dL_dtemporal_mean_from_mean3d = -conv4d_m44_rcp * dot(dL_dmean3d_from_splatting, make_float3(cov4d.m14, cov4d.m24, cov4d.m34));
+        const float dL_dcov4d_m44_from_mean3d = delta_t * conv4d_m44_rcp * dL_dtemporal_mean_from_mean3d;
+
+        // write total temporal mean gradient
+        grad_temporal_means[primitive_idx] = dL_dtemporal_mean_from_marginal_t + dL_dtemporal_mean_from_mean3d;
+
+        // cov4d gradient from conditional 3d covariance
+        const float dL_dcov4d_m11_from_cov3d = dL_dcov3d.m11;
+        const float dL_dcov4d_m12_from_cov3d = dL_dcov3d.m12;
+        const float dL_dcov4d_m13_from_cov3d = dL_dcov3d.m13;
+        const float dL_dcov4d_m14_from_cov3d = -conv4d_m44_rcp * (
+            cov4d.m14 * dL_dcov3d.m11 + cov4d.m24 * dL_dcov3d.m12 + cov4d.m34 * dL_dcov3d.m13
+        );
+        const float dL_dcov4d_m22_from_cov3d = dL_dcov3d.m22;
+        const float dL_dcov4d_m23_from_cov3d = dL_dcov3d.m23;
+        const float dL_dcov4d_m24_from_cov3d = -conv4d_m44_rcp * (
+            cov4d.m24 * dL_dcov3d.m22 + cov4d.m14 * dL_dcov3d.m12 + cov4d.m34 * dL_dcov3d.m23
+        );
+        const float dL_dcov4d_m33_from_cov3d = dL_dcov3d.m33;
+        const float dL_dcov4d_m34_from_cov3d = -conv4d_m44_rcp * (
+            cov4d.m34 * dL_dcov3d.m33 + cov4d.m14 * dL_dcov3d.m13 + cov4d.m24 * dL_dcov3d.m23
+        );
+        const float dL_dcov4d_m44_from_cov3d = conv4d_m44_rcp * conv4d_m44_rcp * (
+            cov4d.m14 * cov4d.m14 * dL_dcov3d.m11 +
+            2.0f * cov4d.m14 * cov4d.m24 * dL_dcov3d.m12 +
+            2.0f * cov4d.m14 * cov4d.m34 * dL_dcov3d.m13 +
+            cov4d.m24 * cov4d.m24 * dL_dcov3d.m22 +
+            2.0f * cov4d.m24 * cov4d.m34 * dL_dcov3d.m23 +
+            cov4d.m34 * cov4d.m34 * dL_dcov3d.m33
+        );
+
+        // symmetric version of full cov4d gradient
+        const mat4x4_triu dL_dcov4d = {
+            dL_dcov4d_m11_from_cov3d,
+            dL_dcov4d_m12_from_cov3d,
+            dL_dcov4d_m13_from_cov3d,
+            dL_dcov4d_m14_from_cov3d + dL_dcov4d_m14_from_mean3d * 0.5f,
+            dL_dcov4d_m22_from_cov3d,
+            dL_dcov4d_m23_from_cov3d,
+            dL_dcov4d_m24_from_cov3d + dL_dcov4d_m24_from_mean3d * 0.5f,
+            dL_dcov4d_m33_from_cov3d,
+            dL_dcov4d_m34_from_cov3d + dL_dcov4d_m34_from_mean3d * 0.5f,
+            dL_dcov4d_m44_from_cov3d + dL_dcov4d_m44_from_mean3d + dL_dcov4d_m44_from_marginal_t
+        };
 
         // scale gradient
-        const float3 dL_dvariance = make_float3(
-            R.m11 * R.m11 * dL_dcov3d.m11 + R.m21 * R.m21 * dL_dcov3d.m22 + R.m31 * R.m31 * dL_dcov3d.m33 +
-                2.0f * (R.m11 * R.m21 * dL_dcov3d.m12 + R.m11 * R.m31 * dL_dcov3d.m13 + R.m21 * R.m31 * dL_dcov3d.m23),
-            R.m12 * R.m12 * dL_dcov3d.m11 + R.m22 * R.m22 * dL_dcov3d.m22 + R.m32 * R.m32 * dL_dcov3d.m33 +
-                2.0f * (R.m12 * R.m22 * dL_dcov3d.m12 + R.m12 * R.m32 * dL_dcov3d.m13 + R.m22 * R.m32 * dL_dcov3d.m23),
-            R.m13 * R.m13 * dL_dcov3d.m11 + R.m23 * R.m23 * dL_dcov3d.m22 + R.m33 * R.m33 * dL_dcov3d.m33 +
-                2.0f * (R.m13 * R.m23 * dL_dcov3d.m12 + R.m13 * R.m33 * dL_dcov3d.m13 + R.m23 * R.m33 * dL_dcov3d.m23)
+        const float4 dL_dvariance = make_float4(
+            R.m11 * R.m11 * dL_dcov4d.m11 + R.m21 * R.m21 * dL_dcov4d.m22 + R.m31 * R.m31 * dL_dcov4d.m33 + R.m41 * R.m41 * dL_dcov4d.m44 +
+                2.0f * (
+                    R.m11 * R.m21 * dL_dcov4d.m12 + R.m11 * R.m31 * dL_dcov4d.m13 + R.m11 * R.m41 * dL_dcov4d.m14 +
+                    R.m21 * R.m31 * dL_dcov4d.m23 + R.m21 * R.m41 * dL_dcov4d.m24 +
+                    R.m31 * R.m41 * dL_dcov4d.m34
+                ),
+            R.m12 * R.m12 * dL_dcov4d.m11 + R.m22 * R.m22 * dL_dcov4d.m22 + R.m32 * R.m32 * dL_dcov4d.m33 + R.m42 * R.m42 * dL_dcov4d.m44 +
+                2.0f * (
+                    R.m12 * R.m22 * dL_dcov4d.m12 + R.m12 * R.m32 * dL_dcov4d.m13 + R.m12 * R.m42 * dL_dcov4d.m14 +
+                    R.m22 * R.m32 * dL_dcov4d.m23 + R.m22 * R.m42 * dL_dcov4d.m24 +
+                    R.m32 * R.m42 * dL_dcov4d.m34
+                ),
+            R.m13 * R.m13 * dL_dcov4d.m11 + R.m23 * R.m23 * dL_dcov4d.m22 + R.m33 * R.m33 * dL_dcov4d.m33 + R.m43 * R.m43 * dL_dcov4d.m44 +
+                2.0f * (
+                    R.m13 * R.m23 * dL_dcov4d.m12 + R.m13 * R.m33 * dL_dcov4d.m13 + R.m13 * R.m43 * dL_dcov4d.m14 +
+                    R.m23 * R.m33 * dL_dcov4d.m23 + R.m23 * R.m43 * dL_dcov4d.m24 +
+                    R.m33 * R.m43 * dL_dcov4d.m34
+                ),
+            R.m14 * R.m14 * dL_dcov4d.m11 + R.m24 * R.m24 * dL_dcov4d.m22 + R.m34 * R.m34 * dL_dcov4d.m33 + R.m44 * R.m44 * dL_dcov4d.m44 +
+                2.0f * (
+                    R.m14 * R.m24 * dL_dcov4d.m12 + R.m14 * R.m34 * dL_dcov4d.m13 + R.m14 * R.m44 * dL_dcov4d.m14 +
+                    R.m24 * R.m34 * dL_dcov4d.m23 + R.m24 * R.m44 * dL_dcov4d.m24 +
+                    R.m34 * R.m44 * dL_dcov4d.m34
+                )
         );
-        const float3 dL_dscale = 2.0f * variance * dL_dvariance;
-        grad_scales[primitive_idx] = dL_dscale;
+        const float4 dL_dscale = 2.0f * variance * dL_dvariance;
+        grad_spatial_scales[primitive_idx] = make_float3(dL_dscale);
+        grad_temporal_scales[primitive_idx] = dL_dscale.w;
 
         // rotation gradient
-        const mat3x3 dL_dR = {
-            2.0f * (RSS.m11 * dL_dcov3d.m11 + RSS.m21 * dL_dcov3d.m12 + RSS.m31 * dL_dcov3d.m13),
-            2.0f * (RSS.m12 * dL_dcov3d.m11 + RSS.m22 * dL_dcov3d.m12 + RSS.m32 * dL_dcov3d.m13),
-            2.0f * (RSS.m13 * dL_dcov3d.m11 + RSS.m23 * dL_dcov3d.m12 + RSS.m33 * dL_dcov3d.m13),
-            2.0f * (RSS.m11 * dL_dcov3d.m12 + RSS.m21 * dL_dcov3d.m22 + RSS.m31 * dL_dcov3d.m23),
-            2.0f * (RSS.m12 * dL_dcov3d.m12 + RSS.m22 * dL_dcov3d.m22 + RSS.m32 * dL_dcov3d.m23),
-            2.0f * (RSS.m13 * dL_dcov3d.m12 + RSS.m23 * dL_dcov3d.m22 + RSS.m33 * dL_dcov3d.m23),
-            2.0f * (RSS.m11 * dL_dcov3d.m13 + RSS.m21 * dL_dcov3d.m23 + RSS.m31 * dL_dcov3d.m33),
-            2.0f * (RSS.m12 * dL_dcov3d.m13 + RSS.m22 * dL_dcov3d.m23 + RSS.m32 * dL_dcov3d.m33),
-            2.0f * (RSS.m13 * dL_dcov3d.m13 + RSS.m23 * dL_dcov3d.m23 + RSS.m33 * dL_dcov3d.m33)
+        const mat4x4 dL_dR = {
+            2.0f * (RSS.m11 * dL_dcov3d.m11 + RSS.m21 * dL_dcov3d.m12 + RSS.m31 * dL_dcov3d.m13 + RSS.m41 * dL_dcov4d.m14),
+            2.0f * (RSS.m12 * dL_dcov3d.m11 + RSS.m22 * dL_dcov3d.m12 + RSS.m32 * dL_dcov3d.m13 + RSS.m42 * dL_dcov4d.m14),
+            2.0f * (RSS.m13 * dL_dcov3d.m11 + RSS.m23 * dL_dcov3d.m12 + RSS.m33 * dL_dcov3d.m13 + RSS.m43 * dL_dcov4d.m14),
+            2.0f * (RSS.m14 * dL_dcov3d.m11 + RSS.m24 * dL_dcov3d.m12 + RSS.m34 * dL_dcov3d.m13 + RSS.m44 * dL_dcov4d.m14),
+
+            2.0f * (RSS.m11 * dL_dcov3d.m12 + RSS.m21 * dL_dcov3d.m22 + RSS.m31 * dL_dcov3d.m23 + RSS.m41 * dL_dcov4d.m24),
+            2.0f * (RSS.m12 * dL_dcov3d.m12 + RSS.m22 * dL_dcov3d.m22 + RSS.m32 * dL_dcov3d.m23 + RSS.m42 * dL_dcov4d.m24),
+            2.0f * (RSS.m13 * dL_dcov3d.m12 + RSS.m23 * dL_dcov3d.m22 + RSS.m33 * dL_dcov3d.m23 + RSS.m43 * dL_dcov4d.m24),
+            2.0f * (RSS.m14 * dL_dcov3d.m12 + RSS.m24 * dL_dcov3d.m22 + RSS.m34 * dL_dcov3d.m23 + RSS.m44 * dL_dcov4d.m24),
+
+            2.0f * (RSS.m11 * dL_dcov3d.m13 + RSS.m21 * dL_dcov3d.m23 + RSS.m31 * dL_dcov3d.m33 + RSS.m41 * dL_dcov4d.m34),
+            2.0f * (RSS.m12 * dL_dcov3d.m13 + RSS.m22 * dL_dcov3d.m23 + RSS.m32 * dL_dcov3d.m33 + RSS.m42 * dL_dcov4d.m34),
+            2.0f * (RSS.m13 * dL_dcov3d.m13 + RSS.m23 * dL_dcov3d.m23 + RSS.m33 * dL_dcov3d.m33 + RSS.m43 * dL_dcov4d.m34),
+            2.0f * (RSS.m14 * dL_dcov3d.m13 + RSS.m24 * dL_dcov3d.m23 + RSS.m34 * dL_dcov3d.m33 + RSS.m44 * dL_dcov4d.m34),
+
+            2.0f * (RSS.m11 * dL_dcov4d.m14 + RSS.m21 * dL_dcov4d.m24 + RSS.m31 * dL_dcov4d.m34 + RSS.m41 * dL_dcov4d.m44),
+            2.0f * (RSS.m12 * dL_dcov4d.m14 + RSS.m22 * dL_dcov4d.m24 + RSS.m32 * dL_dcov4d.m34 + RSS.m42 * dL_dcov4d.m44),
+            2.0f * (RSS.m13 * dL_dcov4d.m14 + RSS.m23 * dL_dcov4d.m24 + RSS.m33 * dL_dcov4d.m34 + RSS.m43 * dL_dcov4d.m44),
+            2.0f * (RSS.m14 * dL_dcov4d.m14 + RSS.m24 * dL_dcov4d.m24 + RSS.m34 * dL_dcov4d.m34 + RSS.m44 * dL_dcov4d.m44)
         };
-        const float4 dL_drotation = convert_quaternion_to_rotation_matrix_backward(raw_rotation, dL_dR);
-        grad_rotations[primitive_idx] = dL_drotation;
+
+        // left isoclinic rotation gradient
+        const float dL_da = dL_dR.m11 * p + dL_dR.m12 * -q + dL_dR.m13 * -r + dL_dR.m14 * -s
+                          + dL_dR.m21 * q + dL_dR.m22 * p + dL_dR.m23 * s + dL_dR.m24 * -r
+                          + dL_dR.m31 * r + dL_dR.m32 * -s + dL_dR.m33 * p + dL_dR.m34 * q
+                          + dL_dR.m41 * s + dL_dR.m42 * r + dL_dR.m43 * -q + dL_dR.m44 * p;
+        const float dL_db = dL_dR.m11 * -q + dL_dR.m12 * -p + dL_dR.m13 * -s + dL_dR.m14 * r
+                          + dL_dR.m21 * p + dL_dR.m22 * -q + dL_dR.m23 * -r + dL_dR.m24 * -s
+                          + dL_dR.m31 * -s + dL_dR.m32 * -r + dL_dR.m33 * q + dL_dR.m34 * -p
+                          + dL_dR.m41 * r + dL_dR.m42 * -s + dL_dR.m43 * p + dL_dR.m44 * q;
+        const float dL_dc = dL_dR.m11 * -r + dL_dR.m12 * s + dL_dR.m13 * -p + dL_dR.m14 * -q
+                          + dL_dR.m21 * s + dL_dR.m22 * r + dL_dR.m23 * -q + dL_dR.m24 * p
+                          + dL_dR.m31 * p + dL_dR.m32 * -q + dL_dR.m33 * -r + dL_dR.m34 * -s
+                          + dL_dR.m41 * -q + dL_dR.m42 * -p + dL_dR.m43 * -s + dL_dR.m44 * r;
+        const float dL_dd = dL_dR.m11 * -s + dL_dR.m12 * -r + dL_dR.m13 * q + dL_dR.m14 * -p
+                          + dL_dR.m21 * -r + dL_dR.m22 * s + dL_dR.m23 * -p + dL_dR.m24 * -q
+                          + dL_dR.m31 * q + dL_dR.m32 * p + dL_dR.m33 * s + dL_dR.m34 * -r
+                          + dL_dR.m41 * p + dL_dR.m42 * -q + dL_dR.m43 * -r + dL_dR.m44 * -s;
+        const float4 dL_dleft_normalized = make_float4(dL_da, dL_db, dL_dc, dL_dd);
+        const float4 left_normalized = make_float4(a, b, c, d);
+        const float4 dL_dleft_isoclinic_rotation = (dL_dleft_normalized - dot(dL_dleft_normalized, left_normalized) * left_normalized) * left_norm_sqrt_rcp;
+        grad_left_isoclinic_rotations[primitive_idx] = dL_dleft_isoclinic_rotation;
+
+        // right isoclinic rotation gradient
+        const float dL_dp = dL_dR.m11 * a + dL_dR.m12 * -b + dL_dR.m13 * -c + dL_dR.m14 * -d
+                          + dL_dR.m21 * b + dL_dR.m22 * a + dL_dR.m23 * -d + dL_dR.m24 * c
+                          + dL_dR.m31 * c + dL_dR.m32 * d + dL_dR.m33 * a + dL_dR.m34 * -b
+                          + dL_dR.m41 * d + dL_dR.m42 * -c + dL_dR.m43 * b + dL_dR.m44 * a;
+        const float dL_dq = dL_dR.m11 * -b + dL_dR.m12 * -a + dL_dR.m13 * d + dL_dR.m14 * -c
+                          + dL_dR.m21 * a + dL_dR.m22 * -b + dL_dR.m23 * -c + dL_dR.m24 * -d
+                          + dL_dR.m31 * d + dL_dR.m32 * -c + dL_dR.m33 * b + dL_dR.m34 * a
+                          + dL_dR.m41 * -c + dL_dR.m42 * -d + dL_dR.m43 * -a + dL_dR.m44 * b;
+        const float dL_dr = dL_dR.m11 * -c + dL_dR.m12 * -d + dL_dR.m13 * -a + dL_dR.m14 * b
+                          + dL_dR.m21 * -d + dL_dR.m22 * c + dL_dR.m23 * -b + dL_dR.m24 * -a
+                          + dL_dR.m31 * a + dL_dR.m32 * -b + dL_dR.m33 * -c + dL_dR.m34 * -d
+                          + dL_dR.m41 * b + dL_dR.m42 * a + dL_dR.m43 * -d + dL_dR.m44 * c;
+        const float dL_ds = dL_dR.m11 * -d + dL_dR.m12 * c + dL_dR.m13 * -b + dL_dR.m14 * -a
+                          + dL_dR.m21 * c + dL_dR.m22 * d + dL_dR.m23 * a + dL_dR.m24 * -b
+                          + dL_dR.m31 * -b + dL_dR.m32 * -a + dL_dR.m33 * d + dL_dR.m34 * -c
+                          + dL_dR.m41 * a + dL_dR.m42 * -b + dL_dR.m43 * -c + dL_dR.m44 * -d;
+        const float4 dL_dright_normalized = make_float4(dL_dp, dL_dq, dL_dr, dL_ds);
+        const float4 right_normalized = make_float4(p, q, r, s);
+        const float4 dL_dright_isoclinic_rotation = (dL_dright_normalized - dot(dL_dright_normalized, right_normalized) * right_normalized) * right_norm_sqrt_rcp;
+        grad_right_isoclinic_rotations[primitive_idx] = dL_dright_isoclinic_rotation;
 
     }
 
@@ -279,8 +431,7 @@ namespace faster_gs::rasterization::kernels::backward {
         const uint n_primitives,
         const uint width,
         const uint height,
-        const uint grid_width,
-        const bool proper_antialiasing)
+        const uint grid_width)
     {
         auto block = cg::this_thread_block();
         auto warp = cg::tiled_partition<32>(block);
@@ -416,9 +567,8 @@ namespace faster_gs::rasterization::kernels::backward {
             const float2 delta = mean2d - pixel;
             const float exponent = -0.5f * (conic.x * delta.x * delta.x + conic.z * delta.y * delta.y) - conic.y * delta.x * delta.y;
             const float gaussian = expf(fminf(exponent, 0.0f));
-            if (!config::original_opacity_interpretation && gaussian < config::min_alpha_threshold) continue;
             const float alpha = opacity * gaussian;
-            if (config::original_opacity_interpretation && alpha < config::min_alpha_threshold) continue;
+            if (alpha < config::min_alpha_threshold) continue;
 
             const float blending_weight = transmittance * alpha;
 
@@ -462,8 +612,7 @@ namespace faster_gs::rasterization::kernels::backward {
             atomicAdd(&grad_conic[primitive_idx], dL_dconic_accum.x);
             atomicAdd(&grad_conic[n_primitives + primitive_idx], dL_dconic_accum.y);
             atomicAdd(&grad_conic[2 * n_primitives + primitive_idx], dL_dconic_accum.z);
-            const float dL_dopacity = proper_antialiasing ? dL_dopacity_accum : opacity * (1.0f - opacity) * dL_dopacity_accum;
-            atomicAdd(&grad_opacity[primitive_idx], dL_dopacity);
+            atomicAdd(&grad_opacity[primitive_idx], dL_dopacity_accum);
             atomicAdd(&grad_sh_coefficients_0[primitive_idx].x, dL_dcolor_accum.x);
             atomicAdd(&grad_sh_coefficients_0[primitive_idx].y, dL_dcolor_accum.y);
             atomicAdd(&grad_sh_coefficients_0[primitive_idx].z, dL_dcolor_accum.z);

@@ -8,9 +8,12 @@ namespace faster_gs::rasterization {
     void backward(
         const float* grad_image,
         const float* image,
-        const float3* means,
-        const float3* scales,
-        const float4* rotations,
+        const float3* spatial_means,
+        const float* temporal_means,
+        const float3* spatial_scales,
+        const float* temporal_scales,
+        const float4* left_isoclinic_rotations,
+        const float4* right_isoclinic_rotations,
         const float* opacities,
         const float3* sh_coefficients_rest,
         const float4* w2c,
@@ -20,9 +23,12 @@ namespace faster_gs::rasterization {
         char* tile_buffers_blob,
         char* instance_buffers_blob,
         char* bucket_buffers_blob,
-        float3* grad_means,
-        float3* grad_scales,
-        float4* grad_rotations,
+        float3* grad_spatial_means,
+        float* grad_temporal_means,
+        float3* grad_spatial_scales,
+        float* grad_temporal_scales,
+        float4* grad_left_isoclinic_rotations,
+        float4* grad_right_isoclinic_rotations,
         float* grad_opacities,
         float3* grad_sh_coefficients_0,
         float3* grad_sh_coefficients_rest,
@@ -41,6 +47,6 @@ namespace faster_gs::rasterization {
         const float focal_y,
         const float center_x,
         const float center_y,
-        const bool proper_antialiasing);
+        const float timestamp);
 
 }

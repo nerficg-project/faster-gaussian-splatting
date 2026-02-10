@@ -8,9 +8,12 @@
 void faster_gs::rasterization::backward(
     const float* grad_image,
     const float* image,
-    const float3* means,
-    const float3* scales,
-    const float4* rotations,
+    const float3* spatial_means,
+    const float* temporal_means,
+    const float3* spatial_scales,
+    const float* temporal_scales,
+    const float4* left_isoclinic_rotations,
+    const float4* right_isoclinic_rotations,
     const float* opacities,
     const float3* sh_coefficients_rest,
     const float4* w2c,
@@ -20,9 +23,12 @@ void faster_gs::rasterization::backward(
     char* tile_buffers_blob,
     char* instance_buffers_blob,
     char* bucket_buffers_blob,
-    float3* grad_means,
-    float3* grad_scales,
-    float4* grad_rotations,
+    float3* grad_spatial_means,
+    float* grad_temporal_means,
+    float3* grad_spatial_scales,
+    float* grad_temporal_scales,
+    float4* grad_left_isoclinic_rotations,
+    float4* grad_right_isoclinic_rotations,
     float* grad_opacities,
     float3* grad_sh_coefficients_0,
     float3* grad_sh_coefficients_rest,
@@ -41,7 +47,7 @@ void faster_gs::rasterization::backward(
     const float focal_y,
     const float center_x,
     const float center_y,
-    const bool proper_antialiasing)
+    const float timestamp)
 {
     const dim3 grid(div_round_up(width, config::tile_width), div_round_up(height, config::tile_height), 1);
     const int n_tiles = grid.x * grid.y;
@@ -49,62 +55,58 @@ void faster_gs::rasterization::backward(
 
     PrimitiveBuffers primitive_buffers = PrimitiveBuffers::from_blob(primitive_buffers_blob, n_primitives);
     TileBuffers tile_buffers = TileBuffers::from_blob(tile_buffers_blob, n_tiles);
+    InstanceBuffers instance_buffers = InstanceBuffers::from_blob(instance_buffers_blob, n_instances, end_bit);
     BucketBuffers bucket_buffers = BucketBuffers::from_blob(bucket_buffers_blob, n_buckets);
+    instance_buffers.primitive_indices.selector = instance_primitive_indices_selector;
 
-    // note that with c++20 one could use a templated lambda to improve readability here
-    auto dispatch_rasterize_backward = [&](const uint* instance_primitive_indices) {
-        kernels::backward::blend_backward_cu<<<n_buckets, 32>>>(
-            tile_buffers.instance_ranges,
-            tile_buffers.buckets_offset,
-            instance_primitive_indices,
-            primitive_buffers.mean2d,
-            primitive_buffers.conic_opacity,
-            primitive_buffers.color,
-            bg_color,
-            grad_image,
-            image,
-            tile_buffers.final_transmittances,
-            tile_buffers.max_n_processed,
-            tile_buffers.n_processed,
-            bucket_buffers.tile_index,
-            bucket_buffers.color_transmittance,
-            grad_mean2d_helper,
-            grad_conic_helper,
-            grad_opacities,
-            grad_sh_coefficients_0,
-            n_primitives,
-            width,
-            height,
-            grid.x,
-            proper_antialiasing
-        );
-        CHECK_CUDA(config::debug, "blend_backward")
-    };
-    if (end_bit <= 16) {
-        auto instance_buffers = InstanceBuffers<ushort>::from_blob(instance_buffers_blob, n_instances, end_bit);
-        instance_buffers.primitive_indices.selector = instance_primitive_indices_selector;
-        dispatch_rasterize_backward(instance_buffers.primitive_indices.Current());
-    }
-    else {
-        auto instance_buffers = InstanceBuffers<uint>::from_blob(instance_buffers_blob, n_instances, end_bit);
-        instance_buffers.primitive_indices.selector = instance_primitive_indices_selector;
-        dispatch_rasterize_backward(instance_buffers.primitive_indices.Current());
-    }
+    kernels::backward::blend_backward_cu<<<n_buckets, 32>>>(
+        tile_buffers.instance_ranges,
+        tile_buffers.buckets_offset,
+        instance_buffers.primitive_indices.Current(),
+        primitive_buffers.mean2d,
+        primitive_buffers.conic_opacity,
+        primitive_buffers.color,
+        bg_color,
+        grad_image,
+        image,
+        tile_buffers.final_transmittances,
+        tile_buffers.max_n_processed,
+        tile_buffers.n_processed,
+        bucket_buffers.tile_index,
+        bucket_buffers.color_transmittance,
+        grad_mean2d_helper,
+        grad_conic_helper,
+        grad_opacities,
+        grad_sh_coefficients_0,
+        n_primitives,
+        width,
+        height,
+        grid.x
+    );
+    CHECK_CUDA(config::debug, "blend_backward")
 
     kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward>>>(
-        means,
-        scales,
-        rotations,
+        spatial_means,
+        temporal_means,
+        spatial_scales,
+        temporal_scales,
+        left_isoclinic_rotations,
+        right_isoclinic_rotations,
         opacities,
         sh_coefficients_rest,
         w2c,
         cam_position,
         primitive_buffers.n_touched_tiles,
+        primitive_buffers.cov3d,
+        primitive_buffers.mean3d,
         grad_mean2d_helper,
         grad_conic_helper,
-        grad_means,
-        grad_scales,
-        grad_rotations,
+        grad_spatial_means,
+        grad_temporal_means,
+        grad_spatial_scales,
+        grad_temporal_scales,
+        grad_left_isoclinic_rotations,
+        grad_right_isoclinic_rotations,
         grad_opacities,
         grad_sh_coefficients_0,
         grad_sh_coefficients_rest,
@@ -118,7 +120,7 @@ void faster_gs::rasterization::backward(
         focal_y,
         center_x,
         center_y,
-        proper_antialiasing
+        timestamp
     );
     CHECK_CUDA(config::debug, "preprocess_backward")
 

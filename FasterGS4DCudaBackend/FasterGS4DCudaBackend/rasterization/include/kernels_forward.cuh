@@ -12,9 +12,12 @@ namespace cg = cooperative_groups;
 namespace faster_gs::rasterization::kernels::forward {
 
     __global__ void preprocess_cu(
-        const float3* __restrict__ means,
-        const float3* __restrict__ scales,
-        const float4* __restrict__ rotations,
+        const float3* __restrict__ spatial_means,
+        const float* __restrict__ temporal_means,
+        const float3* __restrict__ spatial_scales,
+        const float* __restrict__ temporal_scales,
+        const float4* __restrict__ left_isoclinic_rotations,
+        const float4* __restrict__ right_isoclinic_rotations,
         const float* __restrict__ opacities,
         const float3* __restrict__ sh_coefficients_0,
         const float3* __restrict__ sh_coefficients_rest,
@@ -24,6 +27,8 @@ namespace faster_gs::rasterization::kernels::forward {
         uint* __restrict__ primitive_indices,
         uint* __restrict__ primitive_n_touched_tiles,
         ushort4* __restrict__ primitive_screen_bounds,
+        float* __restrict__ primitive_cov3d,
+        float* __restrict__ primitive_mean3d,
         float2* __restrict__ primitive_mean2d,
         float4* __restrict__ primitive_conic_opacity,
         float3* __restrict__ primitive_color,
@@ -42,7 +47,7 @@ namespace faster_gs::rasterization::kernels::forward {
         const float center_y,
         const float near_plane,
         const float far_plane,
-        const bool proper_antialiasing)
+        const float timestamp)
     {
         constexpr uint warp_size = 32;
         auto block = cg::this_thread_block();
@@ -58,8 +63,83 @@ namespace faster_gs::rasterization::kernels::forward {
 
         if (active) primitive_n_touched_tiles[primitive_idx] = 0;
 
-        // load 3d mean
-        const float3 mean3d = means[primitive_idx];
+        // load opacity
+        const float raw_opacity = opacities[primitive_idx];
+        float opacity = sigmoid(raw_opacity);
+        if (opacity < config::min_alpha_threshold) active = false;
+
+        // compute conditional 3d gaussian
+        const float4 raw_left_isoclinic_rotation = left_isoclinic_rotations[primitive_idx];
+        const float left_isoclinic_rotation_norm_sq = dot(raw_left_isoclinic_rotation, raw_left_isoclinic_rotation);
+        if (left_isoclinic_rotation_norm_sq < 1e-8f) active = false;
+        auto [a, b, c, d] = raw_left_isoclinic_rotation * rsqrtf(left_isoclinic_rotation_norm_sq);
+        const float4 raw_right_isoclinic_rotation = right_isoclinic_rotations[primitive_idx];
+        const float right_isoclinic_rotation_norm_sq = dot(raw_right_isoclinic_rotation, raw_right_isoclinic_rotation);
+        if (right_isoclinic_rotation_norm_sq < 1e-8f) active = false;
+        auto [p, q, r, s] = raw_right_isoclinic_rotation * rsqrtf(right_isoclinic_rotation_norm_sq);
+        const mat4x4 R = {
+            a*p - b*q - c*r - d*s, -a*q - b*p + c*s - d*r, -a*r - b*s - c*p + d*q, -a*s + b*r - c*q - d*p,
+            a*q + b*p + c*s - d*r, a*p - b*q + c*r + d*s, a*s - b*r - c*q - d*p, -a*r - b*s + c*p - d*q,
+            a*r - b*s + c*p + d*q, -a*s - b*r - c*q + d*p, a*p + b*q - c*r + d*s, a*q - b*p - c*s - d*r,
+            a*s + b*r - c*q + d*p, a*r - b*s - c*p - d*q, -a*q + b*p - c*s - d*r, a*p + b*q + c*r - d*s
+        };
+        const float3 raw_spatial_scale = spatial_scales[primitive_idx];
+        const float raw_temporal_scale = temporal_scales[primitive_idx];
+        const float4 raw_scale = make_float4(raw_spatial_scale.x, raw_spatial_scale.y, raw_spatial_scale.z, raw_temporal_scale);
+        const float4 variance = expf(2.0f * raw_scale);
+        const mat4x4 RSS = {
+            R.m11 * variance.x, R.m12 * variance.y, R.m13 * variance.z, R.m14 * variance.w,
+            R.m21 * variance.x, R.m22 * variance.y, R.m23 * variance.z, R.m24 * variance.w,
+            R.m31 * variance.x, R.m32 * variance.y, R.m33 * variance.z, R.m34 * variance.w,
+            R.m41 * variance.x, R.m42 * variance.y, R.m43 * variance.z, R.m44 * variance.w
+        };
+        const mat4x4_triu cov4d = {
+            RSS.m11 * R.m11 + RSS.m12 * R.m12 + RSS.m13 * R.m13 + RSS.m14 * R.m14,
+            RSS.m11 * R.m21 + RSS.m12 * R.m22 + RSS.m13 * R.m23 + RSS.m14 * R.m24,
+            RSS.m11 * R.m31 + RSS.m12 * R.m32 + RSS.m13 * R.m33 + RSS.m14 * R.m34,
+            RSS.m11 * R.m41 + RSS.m12 * R.m42 + RSS.m13 * R.m43 + RSS.m14 * R.m44,
+            RSS.m21 * R.m21 + RSS.m22 * R.m22 + RSS.m23 * R.m23 + RSS.m24 * R.m24,
+            RSS.m21 * R.m31 + RSS.m22 * R.m32 + RSS.m23 * R.m33 + RSS.m24 * R.m34,
+            RSS.m21 * R.m41 + RSS.m22 * R.m42 + RSS.m23 * R.m43 + RSS.m24 * R.m44,
+            RSS.m31 * R.m31 + RSS.m32 * R.m32 + RSS.m33 * R.m33 + RSS.m34 * R.m34,
+            RSS.m31 * R.m41 + RSS.m32 * R.m42 + RSS.m33 * R.m43 + RSS.m34 * R.m44,
+            RSS.m41 * R.m41 + RSS.m42 * R.m42 + RSS.m43 * R.m43 + RSS.m44 * R.m44
+        };
+        const float temporal_mean = temporal_means[primitive_idx];
+        const float delta_t = timestamp - temporal_mean;
+        const float conv4d_m44_rcp = 1.0f / cov4d.m44;
+        const float marginal_t = expf(-0.5f * delta_t * delta_t * conv4d_m44_rcp);
+        if (marginal_t < 0.05f) active = false;
+        opacity *= marginal_t;
+        if (opacity < config::min_alpha_threshold) active = false;
+        const mat3x3_triu cov3d {
+            cov4d.m11 - cov4d.m14 * cov4d.m14 * conv4d_m44_rcp,
+            cov4d.m12 - cov4d.m14 * cov4d.m24 * conv4d_m44_rcp,
+            cov4d.m13 - cov4d.m14 * cov4d.m34 * conv4d_m44_rcp,
+            cov4d.m22 - cov4d.m24 * cov4d.m24 * conv4d_m44_rcp,
+            cov4d.m23 - cov4d.m24 * cov4d.m34 * conv4d_m44_rcp,
+            cov4d.m33 - cov4d.m34 * cov4d.m34 * conv4d_m44_rcp,
+        };
+        const float3 spatial_mean3d = spatial_means[primitive_idx];
+        const float3 mean3d = make_float3(
+            spatial_mean3d.x + cov4d.m14 * delta_t * conv4d_m44_rcp,
+            spatial_mean3d.y + cov4d.m24 * delta_t * conv4d_m44_rcp,
+            spatial_mean3d.z + cov4d.m34 * delta_t * conv4d_m44_rcp
+        );
+
+        // store 3d gaussian parameters for backward pass
+        if (active) {
+            primitive_cov3d[primitive_idx] = cov3d.m11;
+            primitive_cov3d[n_primitives + primitive_idx] = cov3d.m12;
+            primitive_cov3d[2 * n_primitives + primitive_idx] = cov3d.m13;
+            primitive_cov3d[3 * n_primitives + primitive_idx] = cov3d.m22;
+            primitive_cov3d[4 * n_primitives + primitive_idx] = cov3d.m23;
+            primitive_cov3d[5 * n_primitives + primitive_idx] = cov3d.m33;
+            primitive_mean3d[primitive_idx] = mean3d.x;
+            primitive_mean3d[n_primitives + primitive_idx] = mean3d.y;
+            primitive_mean3d[2 * n_primitives + primitive_idx] = mean3d.z;
+        }
+        warp.sync();
 
         // z culling
         const float4 w2c_r3 = w2c[2];
@@ -68,32 +148,6 @@ namespace faster_gs::rasterization::kernels::forward {
 
         // early exit if whole warp is inactive
         if (warp.ballot(active) == 0) return;
-
-        // load opacity
-        const float raw_opacity = opacities[primitive_idx];
-        float opacity = sigmoid(raw_opacity);
-        if (config::original_opacity_interpretation && opacity < config::min_alpha_threshold) active = false;
-
-        // compute 3d covariance from scale and rotation
-        const float3 raw_scale = scales[primitive_idx];
-        const float3 variance = expf(2.0f * raw_scale);
-        const float4 raw_rotation = rotations[primitive_idx];
-        float quaternion_norm_sq = 1.0f;
-        const mat3x3 R = convert_quaternion_to_rotation_matrix(raw_rotation, quaternion_norm_sq);
-        if (quaternion_norm_sq < 1e-8f) active = false;
-        const mat3x3 RSS = {
-            R.m11 * variance.x, R.m12 * variance.y, R.m13 * variance.z,
-            R.m21 * variance.x, R.m22 * variance.y, R.m23 * variance.z,
-            R.m31 * variance.x, R.m32 * variance.y, R.m33 * variance.z
-        };
-        const mat3x3_triu cov3d {
-            RSS.m11 * R.m11 + RSS.m12 * R.m12 + RSS.m13 * R.m13,
-            RSS.m11 * R.m21 + RSS.m12 * R.m22 + RSS.m13 * R.m23,
-            RSS.m11 * R.m31 + RSS.m12 * R.m32 + RSS.m13 * R.m33,
-            RSS.m21 * R.m21 + RSS.m22 * R.m22 + RSS.m23 * R.m23,
-            RSS.m21 * R.m31 + RSS.m22 * R.m32 + RSS.m23 * R.m33,
-            RSS.m31 * R.m31 + RSS.m32 * R.m32 + RSS.m33 * R.m33,
-        };
 
         // compute 2d mean in normalized image coordinates
         const float4 w2c_r1 = w2c[0];
@@ -137,10 +191,8 @@ namespace faster_gs::rasterization::kernels::forward {
             dot(jwc_r1, jw_r2),
             dot(jwc_r2, jw_r2)
         );
-        const float determinant_raw = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
-        const float kernel_size = proper_antialiasing ? config::dilation_proper_antialiasing : config::dilation;
-        cov2d.x += kernel_size;
-        cov2d.z += kernel_size;
+        cov2d.x += config::dilation;
+        cov2d.z += config::dilation;
         const float determinant = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
         if (determinant < config::min_cov2d_determinant) active = false;
         const float3 conic = make_float3(
@@ -148,10 +200,6 @@ namespace faster_gs::rasterization::kernels::forward {
             -cov2d.y / determinant,
             cov2d.x / determinant
         );
-        if (proper_antialiasing) {
-            opacity *= sqrtf(fmaxf(determinant_raw / determinant, 0.0f));
-            if (config::original_opacity_interpretation && opacity < config::min_alpha_threshold) active = false;
-        }
 
         // 2d mean in screen space
         const float2 mean2d = make_float2(
@@ -160,7 +208,7 @@ namespace faster_gs::rasterization::kernels::forward {
         );
 
         // compute bounds
-        const float power_threshold = config::original_opacity_interpretation ? logf(opacity * config::min_alpha_threshold_rcp) : config::max_power_threshold;
+        const float power_threshold = logf(opacity * config::min_alpha_threshold_rcp);
         const float cutoff_factor = 2.0f * power_threshold;
         const float extent_x = fmaxf(sqrtf(cov2d.x * cutoff_factor) - 0.5f, 0.0f);
         const float extent_y = fmaxf(sqrtf(cov2d.z * cutoff_factor) - 0.5f, 0.0f);
@@ -197,7 +245,7 @@ namespace faster_gs::rasterization::kernels::forward {
         primitive_conic_opacity[primitive_idx] = make_float4(conic, opacity);
         const float3 color = convert_sh_to_color(
             sh_coefficients_0, sh_coefficients_rest,
-            mean3d, cam_position[0],
+            spatial_mean3d, cam_position[0], // TODO: this could be the conditional mean3d instead
             primitive_idx, active_sh_bases, total_sh_bases
         );
         primitive_color[primitive_idx] = color;
@@ -222,14 +270,13 @@ namespace faster_gs::rasterization::kernels::forward {
     }
 
     // based on https://github.com/r4dl/StopThePop-Rasterization/blob/d8cad09919ff49b11be3d693d1e71fa792f559bb/cuda_rasterizer/stopthepop/stopthepop_common.cuh#L325
-    template <typename KeyT>
     __global__ void create_instances_cu(
         const uint* __restrict__ primitive_indices_sorted,
         const uint* __restrict__ primitive_offsets,
         const ushort4* __restrict__ primitive_screen_bounds,
         const float2* __restrict__ primitive_mean2d,
         const float4* __restrict__ primitive_conic_opacity,
-        KeyT* __restrict__ instance_keys,
+        ushort* __restrict__ instance_keys,
         uint* __restrict__ instance_primitive_indices,
         const uint grid_width,
         const uint n_visible_primitives)
@@ -263,7 +310,7 @@ namespace faster_gs::rasterization::kernels::forward {
         const float4 conic_opacity = primitive_conic_opacity[primitive_idx];
         const float3 conic = make_float3(conic_opacity);
         const float opacity = conic_opacity.w;
-        const float power_threshold = config::original_opacity_interpretation ? logf(opacity * config::min_alpha_threshold_rcp) : config::max_power_threshold;
+        const float power_threshold = logf(opacity * config::min_alpha_threshold_rcp);
 
         uint current_write_offset = primitive_offsets[original_idx];
 
@@ -272,7 +319,7 @@ namespace faster_gs::rasterization::kernels::forward {
             const uint tile_y = screen_bounds.z + (instance_idx / screen_bounds_width);
             if (will_primitive_contribute(mean2d_shifted, conic, tile_x, tile_y, power_threshold)) {
                 const uint tile_idx = tile_y * grid_width + tile_x;
-                const KeyT instance_key = static_cast<KeyT>(tile_idx);
+                const ushort instance_key = static_cast<ushort>(tile_idx);
                 instance_keys[current_write_offset] = instance_key;
                 instance_primitive_indices[current_write_offset] = primitive_idx;
                 current_write_offset++;
@@ -317,7 +364,7 @@ namespace faster_gs::rasterization::kernels::forward {
                 if (write) {
                     const uint write_offset = current_write_offset_coop + __popc(write_ballot & previous_lanes_mask);
                     const uint tile_idx = tile_y * grid_width + tile_x;
-                    const KeyT instance_key = static_cast<KeyT>(tile_idx);
+                    const ushort instance_key = static_cast<ushort>(tile_idx);
                     instance_keys[write_offset] = instance_key;
                     instance_primitive_indices[write_offset] = primitive_idx_coop;
                 }
@@ -328,18 +375,17 @@ namespace faster_gs::rasterization::kernels::forward {
         }
     }
 
-    template <typename KeyT>
     __global__ void extract_instance_ranges_cu(
-        const KeyT* __restrict__ instance_keys,
+        const ushort* __restrict__ instance_keys,
         uint2* __restrict__ tile_instance_ranges,
         const uint n_instances)
     {
         const uint instance_idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (instance_idx >= n_instances) return;
-        const KeyT instance_tile_idx = instance_keys[instance_idx];
+        const ushort instance_tile_idx = instance_keys[instance_idx];
         if (instance_idx == 0) tile_instance_ranges[instance_tile_idx].x = 0;
         else {
-            const KeyT previous_instance_tile_idx = instance_keys[instance_idx - 1];
+            const ushort previous_instance_tile_idx = instance_keys[instance_idx - 1];
             if (instance_tile_idx != previous_instance_tile_idx) {
                 tile_instance_ranges[previous_instance_tile_idx].y = instance_idx;
                 tile_instance_ranges[instance_tile_idx].x = instance_idx;
@@ -435,9 +481,8 @@ namespace faster_gs::rasterization::kernels::forward {
                 const float2 delta = collected_mean2d[j] - pixel;
                 const float exponent = -0.5f * (conic.x * delta.x * delta.x + conic.z * delta.y * delta.y) - conic.y * delta.x * delta.y;
                 const float gaussian = expf(fminf(exponent, 0.0f));
-                if (!config::original_opacity_interpretation && gaussian < config::min_alpha_threshold) continue;
                 const float alpha = opacity * gaussian;
-                if (config::original_opacity_interpretation && alpha < config::min_alpha_threshold) continue;
+                if (alpha < config::min_alpha_threshold) continue;
 
                 // blend fragment into pixel color
                 color_pixel += transmittance * alpha * collected_color[j];

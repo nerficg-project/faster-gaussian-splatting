@@ -1,18 +1,22 @@
 #pragma once
 
-#include "buffer_utils.h"
 #include "helper_math.h"
 #include <functional>
+#include <tuple>
 
 namespace faster_gs::rasterization {
 
-    void inference(
+    std::tuple<int, int, int> forward(
         std::function<char* (size_t)> resize_primitive_buffers,
         std::function<char* (size_t)> resize_tile_buffers,
         std::function<char* (size_t)> resize_instance_buffers,
-        const float3* means,
-        const float3* scales,
-        const float4* rotations,
+        std::function<char* (size_t)> resize_bucket_buffers,
+        const float3* spatial_means,
+        const float* temporal_means,
+        const float3* spatial_scales,
+        const float* temporal_scales,
+        const float4* left_isoclinic_rotations,
+        const float4* right_isoclinic_rotations,
         const float* opacities,
         const float3* sh_coefficients_0,
         const float3* sh_coefficients_rest,
@@ -31,24 +35,6 @@ namespace faster_gs::rasterization {
         const float center_y,
         const float near_plane,
         const float far_plane,
-        const bool proper_antialiasing,
-        const bool to_chw);
-
-    template <typename KeyT>
-    void rasterize(
-        std::function<char* (size_t)>& resize_instance_buffers,
-        PrimitiveBuffers& primitive_buffers,
-        TileBuffers& tile_buffers,
-        const dim3& grid,
-        const dim3& block,
-        const float3* bg_color,
-        float* image,
-        const cudaStream_t memset_stream,
-        const int n_visible_primitives,
-        const int n_instances,
-        const int end_bit,
-        const int width,
-        const int height,
-        const bool to_chw);
+        const float timestamp);
 
 }

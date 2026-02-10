@@ -23,8 +23,24 @@ namespace faster_gs::rasterization {
         float m31, m32, m33;
     };
 
+    struct __align__(16) mat4x4 {
+        float m11, m12, m13, m14;
+        float m21, m22, m23, m24;
+        float m31, m32, m33, m34;
+        float m41, m42, m43, m44;
+    };
+
     struct __align__(8) mat3x3_triu {
-        float m11, m12, m13, m22, m23, m33;
+        float m11, m12, m13,
+                   m22, m23,
+                        m33;
+    };
+
+    struct __align__(8) mat4x4_triu {
+        float m11, m12, m13, m14,
+                   m22, m23, m24,
+                        m33, m34,
+                             m44;
     };
 
     template <typename T>
@@ -50,6 +66,8 @@ namespace faster_gs::rasterization {
         uint* n_touched_tiles;
         uint* offset;
         ushort4* screen_bounds;
+        float* cov3d;
+        float* mean3d;
         float2* mean2d;
         float4* conic_opacity;
         float3* color;
@@ -71,6 +89,8 @@ namespace faster_gs::rasterization {
             obtain(blob, buffers.n_touched_tiles, n_primitives);
             obtain(blob, buffers.offset, n_primitives);
             obtain(blob, buffers.screen_bounds, n_primitives);
+            obtain(blob, buffers.cov3d, n_primitives * 6);
+            obtain(blob, buffers.mean3d, n_primitives * 3);
             obtain(blob, buffers.mean2d, n_primitives);
             obtain(blob, buffers.conic_opacity, n_primitives);
             obtain(blob, buffers.color, n_primitives);
@@ -93,20 +113,19 @@ namespace faster_gs::rasterization {
         }
     };
 
-    template <typename KeyT>
     struct InstanceBuffers {
         size_t cub_workspace_size;
         char* cub_workspace;
-        cub::DoubleBuffer<KeyT> keys;
+        cub::DoubleBuffer<ushort> keys;
         cub::DoubleBuffer<uint> primitive_indices;
 
         static InstanceBuffers from_blob(char*& blob, int n_instances, int end_bit) {
             InstanceBuffers buffers;
-            KeyT* keys_current;
+            ushort* keys_current;
             obtain(blob, keys_current, n_instances);
-            KeyT* keys_alternate;
+            ushort* keys_alternate;
             obtain(blob, keys_alternate, n_instances);
-            buffers.keys = cub::DoubleBuffer<KeyT>(keys_current, keys_alternate);
+            buffers.keys = cub::DoubleBuffer<ushort>(keys_current, keys_alternate);
             uint* primitive_indices_current;
             obtain(blob, primitive_indices_current, n_instances);
             uint* primitive_indices_alternate;

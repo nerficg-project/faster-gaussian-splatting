@@ -1,6 +1,6 @@
 import torch
 
-from FasterGSCudaBackend import _C
+from FasterGS4DCudaBackend import _C
 
 
 class FusedAdam(torch.optim.Adam):

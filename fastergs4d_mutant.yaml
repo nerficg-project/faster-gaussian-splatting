@@ -5,17 +5,15 @@ GLOBAL:
     RANDOM_SEED: 0
     ANOMALY_DETECTION: false
     FILTER_WARNINGS: true
-    METHOD_TYPE: FasterGS
-    DATASET_TYPE: MipNeRF360
+    METHOD_TYPE: FasterGS4D
+    DATASET_TYPE: DNeRF
 MODEL:
     SH_DEGREE: 3
 RENDERER:
     SCALE_MODIFIER: 1.0
-    PROPER_ANTIALIASING: false
-    FORCE_OPTIMIZED_INFERENCE: false
 TRAINING:
     LOAD_CHECKPOINT: null
-    MODEL_NAME: fastergs_garden
+    MODEL_NAME: fastergs4d_mutant
     NUM_ITERATIONS: 30_000
     RUN_VALIDATION: false
     DATA:
@@ -58,21 +56,16 @@ TRAINING:
         GUI_STATUS_INTERVAL: 20
         SKIP_GUI_SETUP: false
         FPS_ROLLING_AVERAGE_SIZE: 100
+    BATCH_SIZE: 4
     DENSIFICATION_START_ITERATION: 600  # while official code states 500, densification actually starts at 600 there
-    DENSIFICATION_END_ITERATION: 14_900  # should be set to 24900 when using MCMC; while official code states 15000, densification actually stops at 14900 there
+    DENSIFICATION_END_ITERATION: 14_900  # while official code states 15000, densification actually stops at 14900 there
     DENSIFICATION_INTERVAL: 100
-    DENSIFICATION_GRAD_THRESHOLD: 0.0002  # only used when USE_MCMC=False
-    DENSIFICATION_PERCENT_DENSE: 0.01  # only used when USE_MCMC=False
-    USE_MCMC: false
-    MAX_PRIMITIVES: 1_000_000  # only used when USE_MCMC=True
-    OPACITY_RESET_INTERVAL: 3_000  # will be skipped when USE_MCMC=True
-    EXTRA_OPACITY_RESET_ITERATION: 500  # will be skipped when USE_MCMC=True
+    DENSIFICATION_GRAD_THRESHOLD: 0.0002
+    DENSIFICATION_PERCENT_DENSE: 0.01
+    OPACITY_RESET_INTERVAL: 3_000
+    EXTRA_OPACITY_RESET_ITERATION: 500
     MORTON_ORDERING_INTERVAL: 5_000  # lowering to 2500 or 1000 may improve performance when number of Gaussians is high
-    MORTON_ORDERING_END_ITERATION: 15_000  # should be set to 25000 when using MCMC
-    FILTER_3D:
-        USE: false
-        ORIGINAL_FORMULATION: false  # if True, the original formulation from the Mip-Splatting paper is used
-        FILTER_VARIANCE: 0.2
+    MORTON_ORDERING_END_ITERATION: 15_000
     USE_RANDOM_BACKGROUND_COLOR: false  # prevents the model from overfitting to the background color
     MIN_OPACITY_AFTER_TRAINING: 0.00392156862745098
     RANDOM_INITIALIZATION:
@@ -84,20 +77,18 @@ TRAINING:
     LOSS:
         LAMBDA_L1: 0.8  # weight for the per-pixel L1 loss on the rgb image
         LAMBDA_DSSIM: 0.2  # weight for the DSSIM loss on the rgb image
-        LAMBDA_OPACITY_REGULARIZATION: 0.0  # should be set to 0.01 when using MCMC
-        LAMBDA_SCALE_REGULARIZATION: 0.0  # should be set to 0.01 when using MCMC
     OPTIMIZER:
         LEARNING_RATE_MEANS_INIT: 0.00016
         LEARNING_RATE_MEANS_FINAL: 1.6e-06
         LEARNING_RATE_MEANS_MAX_STEPS: 30000
         LEARNING_RATE_SH_COEFFICIENTS_0: 0.0025
         LEARNING_RATE_SH_COEFFICIENTS_REST: 0.000125  # 0.0025 / 20
-        LEARNING_RATE_OPACITIES: 0.025  # should be set to 0.05 (old default in official code) when using MCMC
+        LEARNING_RATE_OPACITIES: 0.05
         LEARNING_RATE_SCALES: 0.005
         LEARNING_RATE_ROTATIONS: 0.001
 DATASET:
-    PATH: dataset/mipnerf360/garden
-    IMAGE_SCALE_FACTOR: 0.25
+    PATH: dataset/dnerf/mutant
+    IMAGE_SCALE_FACTOR: null
     NORMALIZE_CUBE: null
     NORMALIZE_RECENTER: false
     BACKGROUND_COLOR:
@@ -105,7 +96,4 @@ DATASET:
     - 0.0
     - 0.0
     NEAR_PLANE: 0.2
-    FAR_PLANE: 10000.0
-    TEST_STEP: 8
-    APPLY_PCA: true  # aligns the scene, usually disabled for benchmarks
-    APPLY_PCA_RESCALE: false
+    FAR_PLANE: 100.0

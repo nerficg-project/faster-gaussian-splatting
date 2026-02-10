@@ -1,7 +1,7 @@
-from Methods.FasterGS.Model import FasterGSModel
-from Methods.FasterGS.Renderer import FasterGSRenderer
-from Methods.FasterGS.Trainer import FasterGSTrainer
+from Methods.FasterGS4D.Model import FasterGS4DModel
+from Methods.FasterGS4D.Renderer import FasterGS4DRenderer
+from Methods.FasterGS4D.Trainer import FasterGS4DTrainer
 
-MODEL = FasterGSModel
-RENDERER = FasterGSRenderer
-TRAINING_INSTANCE = FasterGSTrainer
+MODEL = FasterGS4DModel
+RENDERER = FasterGS4DRenderer
+TRAINING_INSTANCE = FasterGS4DTrainer

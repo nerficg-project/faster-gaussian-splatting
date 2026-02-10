@@ -1,5 +1,5 @@
-#include "inference.h"
-#include "kernels_inference.cuh"
+#include "forward.h"
+#include "kernels_forward.cuh"
 #include "buffer_utils.h"
 #include "rasterization_config.h"
 #include "utils.h"
@@ -8,13 +8,17 @@
 #include <functional>
 
 // sorting is done separately for depth and tile as proposed in https://github.com/m-schuetz/Splatshop
-void faster_gs::rasterization::inference(
+std::tuple<int, int, int> faster_gs::rasterization::forward(
     std::function<char* (size_t)> resize_primitive_buffers,
     std::function<char* (size_t)> resize_tile_buffers,
     std::function<char* (size_t)> resize_instance_buffers,
-    const float3* means,
-    const float3* scales,
-    const float4* rotations,
+    std::function<char* (size_t)> resize_bucket_buffers,
+    const float3* spatial_means,
+    const float* temporal_means,
+    const float3* spatial_scales,
+    const float* temporal_scales,
+    const float4* left_isoclinic_rotations,
+    const float4* right_isoclinic_rotations,
     const float* opacities,
     const float3* sh_coefficients_0,
     const float3* sh_coefficients_rest,
@@ -33,8 +37,7 @@ void faster_gs::rasterization::inference(
     const float center_y,
     const float near_plane,
     const float far_plane,
-    const bool proper_antialiasing,
-    const bool to_chw)
+    const float timestamp)
 {
     const dim3 grid(div_round_up(width, config::tile_width), div_round_up(height, config::tile_height), 1);
     const dim3 block(config::tile_width, config::tile_height, 1);
@@ -61,10 +64,13 @@ void faster_gs::rasterization::inference(
     cudaMemset(primitive_buffers.n_visible_primitives, 0, sizeof(uint));
     cudaMemset(primitive_buffers.n_instances, 0, sizeof(uint));
 
-    kernels::inference::preprocess_cu<<<div_round_up(n_primitives, config::block_size_preprocess), config::block_size_preprocess>>>(
-        means,
-        scales,
-        rotations,
+    kernels::forward::preprocess_cu<<<div_round_up(n_primitives, config::block_size_preprocess), config::block_size_preprocess>>>(
+        spatial_means,
+        temporal_means,
+        spatial_scales,
+        temporal_scales,
+        left_isoclinic_rotations,
+        right_isoclinic_rotations,
         opacities,
         sh_coefficients_0,
         sh_coefficients_rest,
@@ -74,6 +80,8 @@ void faster_gs::rasterization::inference(
         primitive_buffers.primitive_indices.Current(),
         primitive_buffers.n_touched_tiles,
         primitive_buffers.screen_bounds,
+        primitive_buffers.cov3d,
+        primitive_buffers.mean3d,
         primitive_buffers.mean2d,
         primitive_buffers.conic_opacity,
         primitive_buffers.color,
@@ -92,7 +100,7 @@ void faster_gs::rasterization::inference(
         center_y,
         near_plane,
         far_plane,
-        proper_antialiasing
+        timestamp
     );
     CHECK_CUDA(config::debug, "preprocess")
 
@@ -110,7 +118,7 @@ void faster_gs::rasterization::inference(
     );
     CHECK_CUDA(config::debug, "cub::DeviceRadixSort::SortPairs (depth)")
 
-    kernels::inference::apply_depth_ordering_cu<<<div_round_up(n_visible_primitives, config::block_size_apply_depth_ordering), config::block_size_apply_depth_ordering>>>(
+    kernels::forward::apply_depth_ordering_cu<<<div_round_up(n_visible_primitives, config::block_size_apply_depth_ordering), config::block_size_apply_depth_ordering>>>(
         primitive_buffers.primitive_indices.Current(),
         primitive_buffers.n_touched_tiles,
         primitive_buffers.offset,
@@ -127,50 +135,10 @@ void faster_gs::rasterization::inference(
     );
     CHECK_CUDA(config::debug, "cub::DeviceScan::ExclusiveSum (primitive_buffers.offset)")
 
-    // with 16x16 tiles, 16 bit keys are sufficient for up to 16M pixels, i.e., 4Kx4K images
-    // beyond that, 32 bit keys are needed and for best performance, we template the remaining rasterization steps
-    // note that with c++20 one could use a templated lambda to improve readability here
-    #define RASTERIZE_ARGS \
-        resize_instance_buffers, \
-        primitive_buffers, \
-        tile_buffers, \
-        grid, \
-        block, \
-        bg_color, \
-        image, \
-        memset_stream, \
-        n_visible_primitives, \
-        n_instances, \
-        end_bit, \
-        width, \
-        height, \
-        to_chw
-    if (end_bit <= 16) rasterize<ushort>(RASTERIZE_ARGS);
-    else rasterize<uint>(RASTERIZE_ARGS);
-    #undef RASTERIZE_ARGS
-}
+    char* instance_buffers_blob = resize_instance_buffers(required<InstanceBuffers>(n_instances, end_bit));
+    InstanceBuffers instance_buffers = InstanceBuffers::from_blob(instance_buffers_blob, n_instances, end_bit);
 
-template <typename KeyT>
-void faster_gs::rasterization::rasterize(
-    std::function<char* (size_t)>& resize_instance_buffers,
-    PrimitiveBuffers& primitive_buffers,
-    TileBuffers& tile_buffers,
-    const dim3& grid,
-    const dim3& block,
-    const float3* bg_color,
-    float* image,
-    const cudaStream_t memset_stream,
-    const int n_visible_primitives,
-    const int n_instances,
-    const int end_bit,
-    const int width,
-    const int height,
-    const bool to_chw)
-{
-    char* instance_buffers_blob = resize_instance_buffers(required<InstanceBuffers<KeyT>>(n_instances, end_bit));
-    InstanceBuffers<KeyT> instance_buffers = InstanceBuffers<KeyT>::from_blob(instance_buffers_blob, n_instances, end_bit);
-
-    kernels::inference::create_instances_cu<KeyT><<<div_round_up(n_visible_primitives, config::block_size_create_instances), config::block_size_create_instances>>>(
+    kernels::forward::create_instances_cu<<<div_round_up(n_visible_primitives, config::block_size_create_instances), config::block_size_create_instances>>>(
         primitive_buffers.primitive_indices.Current(),
         primitive_buffers.offset,
         primitive_buffers.screen_bounds,
@@ -196,7 +164,7 @@ void faster_gs::rasterization::rasterize(
     if constexpr (!config::debug) cudaStreamSynchronize(memset_stream);
 
     if (n_instances > 0) {
-        kernels::inference::extract_instance_ranges_cu<KeyT><<<div_round_up(n_instances, config::block_size_extract_instance_ranges), config::block_size_extract_instance_ranges>>>(
+        kernels::forward::extract_instance_ranges_cu<<<div_round_up(n_instances, config::block_size_extract_instance_ranges), config::block_size_extract_instance_ranges>>>(
             instance_buffers.keys.Current(),
             tile_buffers.instance_ranges,
             n_instances
@@ -204,18 +172,48 @@ void faster_gs::rasterization::rasterize(
         CHECK_CUDA(config::debug, "extract_instance_ranges")
     }
 
-    kernels::inference::blend_cu<<<grid, block>>>(
+    kernels::forward::extract_bucket_counts<<<div_round_up(n_tiles, config::block_size_extract_bucket_counts), config::block_size_extract_bucket_counts>>>(
         tile_buffers.instance_ranges,
+        tile_buffers.n_buckets,
+        n_tiles
+    );
+    CHECK_CUDA(config::debug, "extract_bucket_counts")
+
+    cub::DeviceScan::InclusiveSum(
+        tile_buffers.cub_workspace,
+        tile_buffers.cub_workspace_size,
+        tile_buffers.n_buckets,
+        tile_buffers.buckets_offset,
+        n_tiles
+    );
+    CHECK_CUDA(config::debug, "cub::DeviceScan::InclusiveSum (tile_buffers.n_buckets)")
+
+    int n_buckets;
+    cudaMemcpy(&n_buckets, tile_buffers.buckets_offset + n_tiles - 1, sizeof(uint), cudaMemcpyDeviceToHost);
+
+    char* bucket_buffers_blob = resize_bucket_buffers(required<BucketBuffers>(n_buckets));
+    BucketBuffers bucket_buffers = BucketBuffers::from_blob(bucket_buffers_blob, n_buckets);
+
+    kernels::forward::blend_cu<<<grid, block>>>(
+        tile_buffers.instance_ranges,
+        tile_buffers.buckets_offset,
         instance_buffers.primitive_indices.Current(),
         primitive_buffers.mean2d,
         primitive_buffers.conic_opacity,
         primitive_buffers.color,
         bg_color,
         image,
+        tile_buffers.final_transmittances,
+        tile_buffers.max_n_processed,
+        tile_buffers.n_processed,
+        bucket_buffers.tile_index,
+        bucket_buffers.color_transmittance,
         width,
         height,
-        grid.x,
-        to_chw
+        grid.x
     );
     CHECK_CUDA(config::debug, "blend")
+
+    return {n_instances, n_buckets, instance_buffers.primitive_indices.selector};
+
 }
