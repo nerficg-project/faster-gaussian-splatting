@@ -1,4 +1,4 @@
-"""FasterGS/utils.py"""
+"""FasterGSFused/utils.py"""
 
 import io
 import warnings
