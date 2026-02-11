@@ -1,0 +1,93 @@
+GLOBAL:
+    LOG_LEVEL: 2
+    GPU_INDICES:
+    - 0
+    RANDOM_SEED: 0
+    ANOMALY_DETECTION: false
+    FILTER_WARNINGS: true
+    METHOD_TYPE: FasterGSBasis
+    DATASET_TYPE: MipNeRF360
+MODEL:
+    SH_DEGREE: 3
+RENDERER:
+    CLAMP_IMAGE_TRAINING: false
+    SCALE_MODIFIER: 1.0
+TRAINING:
+    LOAD_CHECKPOINT: null
+    MODEL_NAME: fastergsbasis_garden
+    NUM_ITERATIONS: 30_000
+    RUN_VALIDATION: false
+    DATA:
+        PRELOADING_LEVEL: 2  # 2: store training images in VRAM, 1: in RAM, 0: no preloading
+        FIELDS: ['rgb', 'alpha']
+        PRECOMPUTE_RAYS: false
+        RAYS_TO_DEVICE: false
+    BACKUP:
+        FINAL_CHECKPOINT: true
+        RENDER_TESTSET: true
+        RENDER_TRAINSET: false
+        RENDER_VALSET: false
+        INTERMEDIATE_RENDERINGS: true
+        VISUALIZE_ERRORS: false
+        INTERVAL: -1
+        TRAINING_STATE: false
+    TIMING:
+        ACTIVATE: true
+        INCLUDE_DATALOADING_IN_TOTAL: false
+        INCLUDE_PRETRAINING_IN_TOTAL: false
+        INCLUDE_POSTTRAINING_IN_TOTAL: false
+    WANDB:
+        ACTIVATE: false
+        ENTITY: null
+        PROJECT: faster_gs
+        LOG_IMAGES: true
+        INDEX_VALIDATION: -1
+        INDEX_TRAINING: -1
+        INTERVAL: 500
+        SWEEP_MODE:
+            ACTIVE: false
+            START_ITERATION: 999
+            ITERATION_STRIDE: 1000
+            NUM_IMAGES: -1
+    WRITE_VRAM_STATS: true
+    GUI:
+        ACTIVATE: true
+        RENDER_INTERVAL: 10
+        GUI_STATUS_ENABLED: true
+        GUI_STATUS_INTERVAL: 20
+        SKIP_GUI_SETUP: false
+        FPS_ROLLING_AVERAGE_SIZE: 100
+    DENSIFICATION_START_ITERATION: 600  # while official code states 500, densification actually starts at 600 there
+    DENSIFICATION_END_ITERATION: 14_900  # while official code states 15000, densification actually stops at 14900 there
+    DENSIFICATION_INTERVAL: 100
+    DENSIFICATION_GRAD_THRESHOLD: 0.0002
+    DENSIFICATION_PERCENT_DENSE: 0.01
+    OPACITY_RESET_INTERVAL: 3_000
+    EXTRA_OPACITY_RESET_ITERATION: 500
+    MIN_OPACITY_AFTER_TRAINING: 0.00392156862745098
+    LOSS:
+        LAMBDA_L1: 0.8  # weight for the per-pixel L1 loss on the rgb image
+        LAMBDA_DSSIM: 0.2  # weight for the DSSIM loss on the rgb image
+    OPTIMIZER:
+        LEARNING_RATE_MEANS_INIT: 0.00016
+        LEARNING_RATE_MEANS_FINAL: 1.6e-06
+        LEARNING_RATE_MEANS_MAX_STEPS: 30000
+        LEARNING_RATE_SH_COEFFICIENTS_0: 0.0025
+        LEARNING_RATE_SH_COEFFICIENTS_REST: 0.000125  # 0.0025 / 20
+        LEARNING_RATE_OPACITIES: 0.025  # recently updated in official code; used to be 0.05
+        LEARNING_RATE_SCALES: 0.005
+        LEARNING_RATE_ROTATIONS: 0.001
+DATASET:
+    PATH: dataset/mipnerf360/garden
+    IMAGE_SCALE_FACTOR: 0.25
+    NORMALIZE_CUBE: null
+    NORMALIZE_RECENTER: false
+    BACKGROUND_COLOR:
+    - 0.0
+    - 0.0
+    - 0.0
+    NEAR_PLANE: 0.2
+    FAR_PLANE: 10000.0
+    TEST_STEP: 8
+    APPLY_PCA: true  # aligns the scene, usually disabled for benchmarks
+    APPLY_PCA_RESCALE: false
