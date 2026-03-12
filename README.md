@@ -11,7 +11,7 @@ This repository presents our answer: the official implementation of “_Faster-G
 
 > __Faster-GS: Analyzing and Improving Gaussian Splatting Optimization__  
 > [Florian Hahlbohm](https://fhahlbohm.github.io), [Linus Franke](https://lfranke.github.io/), [Martin Eisemann](https://graphics.tu-bs.de/people/eisemann), [Marcus Magnor](https://graphics.tu-bs.de/people/magnor)  
- _arXiv, February 2026_  
+ _CVPR, June 2026_  
 > __[Project page](https://fhahlbohm.github.io/faster-gaussian-splatting)&nbsp;| [Paper](https://fhahlbohm.github.io/faster-gaussian-splatting/assets/hahlbohm2026fastergs.pdf)&nbsp;| [BibTeX](https://fhahlbohm.github.io/faster-gaussian-splatting/assets/hahlbohm2026fastergs.bib)__
 
 
@@ -23,14 +23,14 @@ We achieve this by combining ideas from multiple 3DGS follow-up works with our o
 
 This repository has different branches that provide variants of Faster-GS. While we intentionally kept these variants separate to improve readability and modularity, there are no fundamental limitations with combining their respective features.
 
-The `main` branch provides our fast 3DGS implementation with tons of additional features. We hope that their joint availability within an optimized framework will accelerate future research.
+The `main` branch provides our fast 3DGS implementation with many additional features. We hope that their joint availability within an optimized framework will accelerate future research.
 
 - Anti-aliasing improvements based on [Mip-Splatting](https://niujinshuchong.github.io/mip-splatting/)
 - MCMC densification based on [3DGS-MCMC](https://ubc-vision.github.io/3dgs-mcmc/)
 - Different Gaussian truncation modes enabled by a revised opacity interpretation within the rasterizer
 - Improved random initialization through visibility and/or mask-based carving
 - Random background color training to reduce false transparency
-- (coming soon) Even faster training through informed pruning from [Speedy-Splat](https://speedysplat.github.io/)
+- Even faster training through informed pruning from [Speedy-Splat](https://speedysplat.github.io/)
 - (coming soon) Handling of photometric variations in input images through [PPISP](https://research.nvidia.com/labs/sil/projects/ppisp/)
 - (coming soon) Training on distorted images using [3DGUT](https://research.nvidia.com/labs/toronto-ai/3DGUT/)
 
@@ -49,7 +49,7 @@ Our implementation is provided as an extension to [NeRFICG](https://github.com/n
 
 __Easy integration into existing codebases:__  
 We understand that for compatibility with previous or current projects you might not be able to immediately switch from your current 3DGS framework.
-Therefore, we tried to make it as easy as possible to integrate the most impactful improvements into exisiting codebases. Our CUDA backend can be installed into an exisiting environment as a PyTorch extension through the following command:
+Therefore, we tried to make it as easy as possible to integrate the most impactful improvements into existing codebases. Our CUDA backend can be installed into an existing environment as a PyTorch extension through the following command:
 ```shell
 pip install git+https://github.com/nerficg-project/faster-gaussian-splatting/#subdirectory=FasterGSCudaBackend --no-build-isolation
 ```
@@ -111,17 +111,12 @@ python ./scripts/install.py -m FasterGS4D
 
 ## Usage
 
-Coming soon ...
-
-### Training and Inference
-
 The Faster-GS method is fully compatible with the NeRFICG scripts in the `scripts/` directory.
 This includes config file generation via `create_config.py`,
-training via `train.py`,
+training via `train.py`/`sequential_train.py`/`benchmark.py`,
 inference and performance benchmarking via `inference.py`,
-metric calculation via `generate_tables.py`,
-and live rendering via `gui.py`.
-For development, we also use the `benchmark.py` script that allows easy evaluation of a given configuration file for all scenes in a dataset.
+exporting trained models to .ply files via `convert_to_ply.py`,
+and interactive rendering via `gui.py`.
 
 For detailed instructions, please refer to the [NeRFICG repository](https://github.com/nerficg-project/nerficg).
 
@@ -141,6 +136,7 @@ We thank the authors of the following works, whose ideas and open-source impleme
 - Yang et al. [_Real-time Photorealistic Dynamic Scene Representation and Rendering with 4D Gaussian Splatting._](https://fudan-zvg.github.io/4d-gaussian-splatting/) ICLR 2024.
 - Yu et al. [_Mip-Splatting: Alias-free 3D Gaussian Splatting._](https://niujinshuchong.github.io/mip-splatting/) CVPR 2024.
 - Kheradmand et al. [_3D Gaussian Splatting as Markov Chain Monte Carlo._](https://ubc-vision.github.io/3dgs-mcmc/) NeurIPS 2024.
+- Hanson et al. [_Speedy-Splat: Fast 3D Gaussian Splatting with Sparse Pixels and Sparse Primitives._](https://speedysplat.github.io/) CVPR 2025.
 
 We also thank [Janusch Patas (aka. MrNeRF)](https://github.com/MrNeRF) for partially inspiring this project with his open-source bounty for [LichtFeld Studio](https://lichtfeld.io/), where an early version of our work was the [winning submission](https://github.com/MrNeRF/LichtFeld-Studio/pull/245) and has since become one of its core components.
 
