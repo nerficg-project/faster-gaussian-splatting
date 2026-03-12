@@ -152,3 +152,25 @@ def rasterize(
         *rasterizer_settings.as_tuple(),
         to_chw,
     )
+
+
+def update_pruning_scores(
+    scores: torch.Tensor,
+    means: torch.Tensor,
+    scales: torch.Tensor,
+    rotations: torch.Tensor,
+    opacities: torch.Tensor,
+    sh_coefficients_0: torch.Tensor,
+    sh_coefficients_rest: torch.Tensor,
+    rasterizer_settings: RasterizerSettings,
+) -> torch.Tensor:
+    return _C.pruning_scores(
+        scores,
+        means,
+        scales,
+        rotations,
+        opacities,
+        sh_coefficients_0,
+        sh_coefficients_rest,
+        *rasterizer_settings.as_tuple(),
+    )

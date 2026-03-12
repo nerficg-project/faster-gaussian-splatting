@@ -20,6 +20,14 @@ from Optim.Samplers.DatasetSamplers import DatasetSampler
     DENSIFICATION_INTERVAL=100,
     DENSIFICATION_GRAD_THRESHOLD=0.0002,  # only used when USE_MCMC=False
     DENSIFICATION_PERCENT_DENSE=0.01,  # only used when USE_MCMC=False
+    SPEEDYSPLAT_PRUNING=Framework.ConfigParameterList(
+        USE=False,  # only used when USE_MCMC=False
+        START_ITERATION=6_000,
+        END_ITERATION=30_000,
+        INTERVAL=3_000,
+        SOFT_PRUNING_RATIO=0.8,
+        HARD_PRUNING_RATIO=0.3,
+    ),
     USE_MCMC=False,
     MAX_PRIMITIVES=1_000_000,  # only used when USE_MCMC=True
     OPACITY_RESET_INTERVAL=3_000,  # will be skipped when USE_MCMC=True
@@ -52,7 +60,7 @@ from Optim.Samplers.DatasetSamplers import DatasetSampler
         LEARNING_RATE_MEANS_MAX_STEPS=30_000,
         LEARNING_RATE_SH_COEFFICIENTS_0=0.0025,
         LEARNING_RATE_SH_COEFFICIENTS_REST=0.000125,  # 0.0025 / 20
-        LEARNING_RATE_OPACITIES=0.025,  # should be set to 0.05 (old default in official code) when using MCMC
+        LEARNING_RATE_OPACITIES=0.025,  # use 0.05 (old default in official code) with MCMC densification or Speedy-Splat pruning to match the respective paper
         LEARNING_RATE_SCALES=0.005,
         LEARNING_RATE_ROTATIONS=0.001,
     ),
@@ -114,6 +122,12 @@ class FasterGSTrainer(GuiTrainer):
             self.model.gaussians.mcmc_densification(min_opacity=0.005, cap_max=self.MAX_PRIMITIVES)
         else:
             self.model.gaussians.adaptive_density_control(self.DENSIFICATION_GRAD_THRESHOLD, 0.005, iteration > self.OPACITY_RESET_INTERVAL)
+
+            if self.SPEEDYSPLAT_PRUNING.USE and self.SPEEDYSPLAT_PRUNING.START_ITERATION <= iteration < self.SPEEDYSPLAT_PRUNING.END_ITERATION and iteration % self.SPEEDYSPLAT_PRUNING.INTERVAL == 0:
+                # Soft Pruning (see https://github.com/j-alex-hanson/speedy-splat/blob/e480b2c3944e4aac4e251307216fe1b8d6a0afc3/train.py#L178-L188)
+                scores = self.renderer.compute_pruning_scores(dataset.train())
+                self.model.gaussians.importance_pruning(scores, pruning_ratio=self.SPEEDYSPLAT_PRUNING.SOFT_PRUNING_RATIO)
+
             if iteration < self.DENSIFICATION_END_ITERATION:
                 self.model.gaussians.reset_densification_info()
         if self.requires_empty_cache:
@@ -180,6 +194,14 @@ class FasterGSTrainer(GuiTrainer):
         self.model.gaussians.optimizer.step()
         self.model.gaussians.optimizer.zero_grad()
         self.model.gaussians.post_optimizer_step(inject_noise=self.USE_MCMC)
+
+    @training_callback(active='SPEEDYSPLAT_PRUNING.USE', priority=70, start_iteration='SPEEDYSPLAT_PRUNING.START_ITERATION', end_iteration='SPEEDYSPLAT_PRUNING.END_ITERATION', iteration_stride='SPEEDYSPLAT_PRUNING.INTERVAL')
+    @torch.no_grad()
+    def hard_pruning(self, iteration: int, dataset: 'BaseDataset') -> None:
+        """Speedy-Splat Hard Pruning (see https://github.com/j-alex-hanson/speedy-splat/blob/e480b2c3944e4aac4e251307216fe1b8d6a0afc3/train.py#L202-L213)."""
+        if iteration >= self.DENSIFICATION_END_ITERATION + self.DENSIFICATION_INTERVAL:
+            scores = self.renderer.compute_pruning_scores(dataset.train())
+            self.model.gaussians.importance_pruning(scores, pruning_ratio=self.SPEEDYSPLAT_PRUNING.HARD_PRUNING_RATIO)
 
     @training_callback(active='WANDB.ACTIVATE', priority=10, iteration_stride='WANDB.INTERVAL')
     @torch.no_grad()

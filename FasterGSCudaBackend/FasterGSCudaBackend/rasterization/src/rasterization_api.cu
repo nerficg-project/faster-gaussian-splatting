@@ -2,6 +2,7 @@
 #include "forward.h"
 #include "backward.h"
 #include "inference.h"
+#include "pruning_scores.h"
 #include "torch_utils.h"
 #include "rasterization_config.h"
 #include "helper_math.h"
@@ -241,4 +242,66 @@ faster_gs::rasterization::inference_wrapper(
     );
 
     return image;
+}
+
+void
+faster_gs::rasterization::pruning_scores_wrapper(
+    torch::Tensor& scores,
+    const torch::Tensor& means,
+    const torch::Tensor& scales,
+    const torch::Tensor& rotations,
+    const torch::Tensor& opacities,
+    const torch::Tensor& sh_coefficients_0,
+    const torch::Tensor& sh_coefficients_rest,
+    const torch::Tensor& w2c,
+    const torch::Tensor& cam_position,
+    const torch::Tensor& bg_color,
+    const int active_sh_bases,
+    const int width,
+    const int height,
+    const float focal_x,
+    const float focal_y,
+    const float center_x,
+    const float center_y,
+    const float near_plane,
+    const float far_plane,
+    const bool proper_antialiasing)
+{
+    const int n_primitives = means.size(0);
+    const int total_sh_bases = sh_coefficients_rest.size(1);
+    const torch::TensorOptions byte_options = torch::TensorOptions().dtype(torch::kByte).device(torch::kCUDA);
+    torch::Tensor primitive_buffers = torch::empty({0}, byte_options);
+    torch::Tensor tile_buffers = torch::empty({0}, byte_options);
+    torch::Tensor instance_buffers = torch::empty({0}, byte_options);
+    const std::function<char*(size_t)> resize_primitive_buffers = resize_function_wrapper(primitive_buffers);
+    const std::function<char*(size_t)> resize_tile_buffers = resize_function_wrapper(tile_buffers);
+    const std::function<char*(size_t)> resize_instance_buffers = resize_function_wrapper(instance_buffers);
+
+    pruning_scores(
+        resize_primitive_buffers,
+        resize_tile_buffers,
+        resize_instance_buffers,
+        reinterpret_cast<float3*>(means.data_ptr<float>()),
+        reinterpret_cast<float3*>(scales.data_ptr<float>()),
+        reinterpret_cast<float4*>(rotations.data_ptr<float>()),
+        opacities.data_ptr<float>(),
+        reinterpret_cast<float3*>(sh_coefficients_0.data_ptr<float>()),
+        reinterpret_cast<float3*>(sh_coefficients_rest.data_ptr<float>()),
+        reinterpret_cast<float4*>(w2c.contiguous().data_ptr<float>()),
+        reinterpret_cast<float3*>(cam_position.contiguous().data_ptr<float>()),
+        reinterpret_cast<float3*>(bg_color.contiguous().data_ptr<float>()),
+        scores.data_ptr<float>(),
+        n_primitives,
+        active_sh_bases,
+        total_sh_bases,
+        width,
+        height,
+        focal_x,
+        focal_y,
+        center_x,
+        center_y,
+        near_plane,
+        far_plane,
+        proper_antialiasing
+    );
 }

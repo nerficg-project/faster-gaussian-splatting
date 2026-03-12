@@ -6,12 +6,13 @@ import torch
 
 import Framework
 from Cameras.Perspective import PerspectiveCamera
+from Datasets.Base import BaseDataset
 from Datasets.utils import View
 from Logging import Logger
 from Methods.Base.Renderer import BaseModel
 from Methods.Base.Renderer import BaseRenderer
 from Methods.FasterGS.Model import FasterGSModel
-from Methods.FasterGS.FasterGSCudaBackend import diff_rasterize, rasterize, RasterizerSettings
+from Methods.FasterGS.FasterGSCudaBackend import diff_rasterize, rasterize, update_pruning_scores, RasterizerSettings
 
 
 def extract_settings(
@@ -109,6 +110,23 @@ class FasterGSRenderer(BaseRenderer):
             to_chw=to_chw
         )
         return {'rgb': image}
+
+    @torch.inference_mode()
+    def compute_pruning_scores(self, dataset: BaseDataset) -> torch.Tensor:
+        """Computes the pruning scores for the current dataset."""
+        scores = torch.zeros(self.model.gaussians.means.shape[0], device=self.model.gaussians.means.device, dtype=torch.float32)
+        for view in dataset:
+            update_pruning_scores(
+                scores=scores,
+                means=self.model.gaussians.means,
+                scales=self.model.gaussians.raw_scales,
+                rotations=self.model.gaussians.raw_rotations,
+                opacities=self.model.gaussians.raw_opacities,
+                sh_coefficients_0=self.model.gaussians.sh_coefficients_0,
+                sh_coefficients_rest=self.model.gaussians.sh_coefficients_rest,
+                rasterizer_settings=extract_settings(view, self.model.gaussians.active_sh_bases, view.camera.background_color, self.PROPER_ANTIALIASING),
+            )
+        return scores
 
     def postprocess_outputs(self, outputs: dict[str, torch.Tensor], *_) -> dict[str, torch.Tensor]:
         """Postprocesses the model outputs, returning tensors of shape 3xHxW."""

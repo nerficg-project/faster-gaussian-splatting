@@ -457,6 +457,13 @@ class Gaussians(torch.nn.Module):
         order = torch.argsort(morton_encoding)
         self.sort(order)
 
+    def importance_pruning(self, scores: torch.Tensor, pruning_ratio: float) -> None:
+        """Prunes the given percentage of Gaussians with the lowest importance score (from Speedy-Splat)."""
+        k = int(pruning_ratio * (scores.numel() - 1)) + 1  # kthvalue is 1-based
+        threshold = torch.kthvalue(scores, k).values
+        prune_mask = scores <= threshold
+        self.prune(prune_mask)
+
     @torch.no_grad()
     def post_optimizer_step(self, inject_noise: bool) -> None:
         """Applies modifications to the Gaussians after every optimizer step."""
