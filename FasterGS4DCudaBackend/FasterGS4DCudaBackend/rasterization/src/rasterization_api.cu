@@ -149,7 +149,7 @@ faster_gs::rasterization::backward_wrapper(
     const bool update_densification_info = densification_info.size(0) > 0;
 
     backward(
-        grad_image.data_ptr<float>(),
+        grad_image.contiguous().data_ptr<float>(),
         image.data_ptr<float>(),
         reinterpret_cast<float3*>(spatial_means.data_ptr<float>()),
         temporal_means.data_ptr<float>(),
