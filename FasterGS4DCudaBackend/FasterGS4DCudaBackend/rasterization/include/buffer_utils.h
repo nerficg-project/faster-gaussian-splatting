@@ -160,7 +160,6 @@ namespace faster_gs::rasterization {
             obtain(blob, buffers.buckets_offset, n_tiles);
             obtain(blob, buffers.max_n_processed, n_tiles);
             obtain(blob, buffers.n_processed, n_tiles * config::block_size_blend);
-            obtain(blob, buffers.final_transmittances, n_tiles * config::block_size_blend);
             cub::DeviceScan::InclusiveSum(
                 nullptr, buffers.cub_workspace_size,
                 buffers.n_buckets, buffers.buckets_offset,
