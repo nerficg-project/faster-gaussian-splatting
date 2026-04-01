@@ -190,7 +190,7 @@ namespace faster_gs::rasterization {
 
         static BucketBuffers from_blob(char*& blob, int n_buckets) {
             BucketBuffers buffers;
-            obtain(blob, buffers.tile_index, n_buckets * config::block_size_blend);
+            obtain(blob, buffers.tile_index, n_buckets);
             obtain(blob, buffers.color_transmittance, n_buckets * config::block_size_blend);
             return buffers;
         }
