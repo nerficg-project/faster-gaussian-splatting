@@ -70,11 +70,11 @@ namespace faster_gs::rasterization::kernels {
         const float2 rect_max = make_float2(static_cast<float>((tile_x + 1) * config::tile_width - 1), static_cast<float>((tile_y + 1) * config::tile_height - 1));
 
         const float x_min_diff = rect_min.x - mean.x;
-        const float x_left = static_cast<float>(x_min_diff > 0.0f);
+        const float x_left = static_cast<float>(x_min_diff >= 0.0f);
         const float not_in_x_range = x_left + static_cast<float>(mean.x > rect_max.x);
 
         const float y_min_diff = rect_min.y - mean.y;
-        const float y_above = static_cast<float>(y_min_diff > 0.0f);
+        const float y_above = static_cast<float>(y_min_diff >= 0.0f);
         const float not_in_y_range = y_above + static_cast<float>(mean.y > rect_max.y);
 
         // let's hope the compiler optimizes this properly
