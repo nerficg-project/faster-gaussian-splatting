@@ -50,3 +50,9 @@ def carve(points: torch.Tensor, dataset: BaseDataset, in_all_frustums: bool, enf
             in_alpha_all[in_frustum] &= valid_alpha
     valid_mask = in_frustum_any & in_alpha_all & in_frustum_all
     return points[valid_mask].contiguous()
+
+
+def rgb_to_sh0(rgb: float | torch.Tensor, base_color: float = 0.5) -> float | torch.Tensor:
+    """Inverse of the color activation applied in the rasterizer for inputs in [0, inf)."""
+    SH_C0 = 0.28209479177387814  # 1/(2*sqrt(pi))
+    return (rgb - base_color) / SH_C0

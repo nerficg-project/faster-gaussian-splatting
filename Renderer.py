@@ -12,6 +12,7 @@ from Logging import Logger
 from Methods.Base.Renderer import BaseModel
 from Methods.Base.Renderer import BaseRenderer
 from Methods.FasterGS.Model import FasterGSModel
+from Methods.FasterGS.utils import rgb_to_sh0
 from Methods.FasterGS.FasterGSCudaBackend import diff_rasterize, rasterize, update_pruning_scores, RasterizerSettings
 
 
@@ -45,6 +46,8 @@ def extract_settings(
 @Framework.Configurable.configure(
     SCALE_MODIFIER=1.0,
     PROPER_ANTIALIASING=False,
+    RENDER_DIFFUSE=True,
+    RENDER_SPECULAR=True,
     FORCE_OPTIMIZED_INFERENCE=False,
 )
 class FasterGSRenderer(BaseRenderer):
@@ -90,8 +93,8 @@ class FasterGSRenderer(BaseRenderer):
             scales=self.model.gaussians.raw_scales + math.log(max(self.SCALE_MODIFIER, 1e-6)),
             rotations=self.model.gaussians.raw_rotations,
             opacities=self.model.gaussians.raw_opacities,
-            sh_coefficients_0=self.model.gaussians.sh_coefficients_0,
-            sh_coefficients_rest=self.model.gaussians.sh_coefficients_rest,
+            sh_coefficients_0=self.model.gaussians.sh_coefficients_0 if self.RENDER_DIFFUSE else torch.full_like(self.model.gaussians.sh_coefficients_0, fill_value=rgb_to_sh0(0.0)),
+            sh_coefficients_rest=self.model.gaussians.sh_coefficients_rest if self.RENDER_SPECULAR else torch.zeros_like(self.model.gaussians.sh_coefficients_rest),
             densification_info=torch.empty(0),
             rasterizer_settings=extract_settings(view, self.model.gaussians.active_sh_bases, view.camera.background_color, self.PROPER_ANTIALIASING),
         )
