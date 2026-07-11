@@ -114,3 +114,9 @@ def build_4d_rotation(quaternions_left: torch.Tensor, quaternions_right: torch.T
     R_right = quaternion_to_right_isoclinic(quaternions_right, normalize=normalize)
     R = R_left @ R_right
     return R
+
+
+def rgb_to_sh0(rgb: float | torch.Tensor, base_color: float = 0.5) -> float | torch.Tensor:
+    """Inverse of the color activation applied in the rasterizer for inputs in [0, inf)."""
+    SH_C0 = 0.28209479177387814  # 1/(2*sqrt(pi))
+    return (rgb - base_color) / SH_C0

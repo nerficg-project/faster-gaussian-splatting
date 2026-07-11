@@ -10,7 +10,7 @@ from CudaUtils.MortonEncoding import morton_encode
 from Datasets.utils import BasicPointCloud
 from Logging import Logger
 from Methods.Base.Model import BaseModel
-from Methods.FasterGS4D.utils import build_4d_rotation
+from Methods.FasterGS4D.utils import rgb_to_sh0, build_4d_rotation
 from Methods.FasterGS4D.FasterGS4DCudaBackend import FusedAdam
 from Optim.adam_utils import replace_param_group_data, prune_param_groups, extend_param_groups, sort_param_groups
 from Optim.lr_utils import LRDecayPolicy
@@ -171,8 +171,10 @@ class Gaussians(torch.nn.Module):
         temporal_means = temporal_means * (max_timestamp - min_timestamp) + min_timestamp
         Logger.log_info(f'number of Gaussians at initialization: {n_initial_gaussians:,}')
         # initial sh coefficients
-        rgbs = torch.full_like(spatial_means, fill_value=0.5) if point_cloud.colors is None else point_cloud.colors.cuda()
-        sh_coefficients_0 = ((rgbs - 0.5) / 0.28209479177387814)[:, None, :]
+        if point_cloud.colors is None:
+            sh_coefficients_0 = torch.full((n_initial_gaussians, 1, 3), fill_value=rgb_to_sh0(0.5), dtype=torch.float32, device='cuda')
+        else:
+            sh_coefficients_0 = rgb_to_sh0(point_cloud.colors.cuda()[:, None, :])
         sh_coefficients_rest = torch.zeros((n_initial_gaussians, (self.max_sh_degree + 1) ** 2 - 1, 3), dtype=torch.float32, device='cuda')
         # initial scales
         distances = compute_root_mean_squared_knn_distances(spatial_means)
