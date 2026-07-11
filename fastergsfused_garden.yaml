@@ -11,6 +11,8 @@ MODEL:
     SH_DEGREE: 3
 RENDERER:
     SCALE_MODIFIER: 1.0
+    RENDER_DIFFUSE: true
+    RENDER_SPECULAR: true
 TRAINING:
     LOAD_CHECKPOINT: null
     MODEL_NAME: fastergsfused_garden

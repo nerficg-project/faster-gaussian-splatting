@@ -11,6 +11,7 @@ from Logging import Logger
 from Methods.Base.Renderer import BaseModel
 from Methods.Base.Renderer import BaseRenderer
 from Methods.FasterGSFused.Model import FasterGSFusedModel
+from Methods.FasterGSFused.utils import rgb_to_sh0
 from Methods.FasterGSFused.FasterGSFusedCudaBackend import diff_rasterize, RasterizerSettings
 
 
@@ -45,6 +46,8 @@ def extract_settings(
 
 @Framework.Configurable.configure(
     SCALE_MODIFIER=1.0,
+    RENDER_DIFFUSE=True,
+    RENDER_SPECULAR=True,
 )
 class FasterGSFusedRenderer(BaseRenderer):
     """Wrapper around the rasterization module from 3DGS."""
@@ -92,8 +95,8 @@ class FasterGSFusedRenderer(BaseRenderer):
             scales=self.model.gaussians.raw_scales + math.log(max(self.SCALE_MODIFIER, 1e-6)),
             rotations=self.model.gaussians.raw_rotations,
             opacities=self.model.gaussians.raw_opacities,
-            sh_coefficients_0=self.model.gaussians.sh_coefficients_0,
-            sh_coefficients_rest=self.model.gaussians.sh_coefficients_rest,
+            sh_coefficients_0=self.model.gaussians.sh_coefficients_0 if self.RENDER_DIFFUSE else torch.full_like(self.model.gaussians.sh_coefficients_0, fill_value=rgb_to_sh0(0.0)),
+            sh_coefficients_rest=self.model.gaussians.sh_coefficients_rest if self.RENDER_SPECULAR else torch.zeros_like(self.model.gaussians.sh_coefficients_rest),
             autograd_dummy=torch.empty(0),
             densification_info=torch.empty(0),
             rasterizer_settings=extract_settings(view, self.model.gaussians.active_sh_bases, view.camera.background_color, 0.0, 0),
