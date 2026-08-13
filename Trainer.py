@@ -123,7 +123,7 @@ class FasterGSFusedTrainer(GuiTrainer):
 
     @training_callback(priority=80)
     def training_iteration(self, iteration: int, dataset: 'BaseDataset') -> None:
-        """Performs a training step without actually doing the optimizer step."""
+        """Performs a training step."""
         # init modes
         self.model.train()
         dataset.train()
