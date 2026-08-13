@@ -236,6 +236,8 @@ class FasterGSTrainer(GuiTrainer):
                 self.model.train()
                 dataset.train()
                 self.loss.train()
+                self.loss.update_loss_weight('OPACITY_REGULARIZATION', 0.0)
+                self.loss.update_loss_weight('SCALE_REGULARIZATION', 0.0)
                 for _ in Logger.log_progress(range(self.model.ppisp.config.controller_training_steps)):
                     # get random view
                     view = self.train_sampler.get(dataset=dataset)['view']
