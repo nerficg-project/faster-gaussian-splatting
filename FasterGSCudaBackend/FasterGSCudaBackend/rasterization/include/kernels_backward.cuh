@@ -154,7 +154,7 @@ namespace faster_gs::rasterization::kernels::backward {
                 const float dL_dradicand = dL_dopacity_conv_factor * opacity / fmaxf(2.0f * conv_factor, 1e-6f);
                 const float one_minus_radicand = 1.0f - radicand;
                 dL_dcov2d.x += dL_dradicand * (one_minus_radicand * conic.x - kernel_size * determinant_conic);
-                dL_dcov2d.y += dL_dradicand * 2.0f * one_minus_radicand * conic.y;
+                dL_dcov2d.y += dL_dradicand * one_minus_radicand * conic.y;
                 dL_dcov2d.z += dL_dradicand * (one_minus_radicand * conic.z - kernel_size * determinant_conic);
             }
         }
