@@ -216,6 +216,7 @@ class Gaussians(torch.nn.Module):
             self._densification_info = self._densification_info[:, ordering].contiguous()
 
     def reset_densification_info(self):
+        """Resets the densification info buffers to zero."""
         self._densification_info = torch.zeros((2, self._means.shape[0]), dtype=torch.float32, device='cuda')
 
     def adaptive_density_control(self, grad_threshold: float, min_opacity: float, prune_large_gaussians: bool) -> None:

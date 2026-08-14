@@ -23,8 +23,8 @@ from Optim.Samplers.DatasetSamplers import DatasetSampler
     OPACITY_RESET_INTERVAL=3_000,
     EXTRA_OPACITY_RESET_ITERATION=500,
     USE_MORTON_ORDERING=False,
-    MORTON_ORDERING_INTERVAL=5000,  # lowering to 2500 or 1000 may improve performance when number of Gaussians is high
-    MORTON_ORDERING_END_ITERATION=15000,
+    MORTON_ORDERING_INTERVAL=5_000,  # lowering to 2500 or 1000 may improve performance when number of Gaussians is high
+    MORTON_ORDERING_END_ITERATION=15_000,
     USE_RANDOM_BACKGROUND_COLOR=False,  # prevents the model from overfitting to the background color
     MIN_OPACITY_AFTER_TRAINING=1 / 255,
     RANDOM_INITIALIZATION=Framework.ConfigParameterList(
@@ -177,7 +177,6 @@ class FasterGSTestbedTrainer(GuiTrainer):
         Logger.log_info(f'final number of Gaussians: {n_gaussians:,}')
         with open(str(self.output_directory / 'n_gaussians.txt'), 'w') as n_gaussians_file:
             n_gaussians_file.write(
-                f'Final number of Gaussians: {n_gaussians:,}\n'
-                f'\n'
+                f'Final number of Gaussians: {n_gaussians:,}\n\n'
                 f'N_Gaussians:{n_gaussians}'
             )
