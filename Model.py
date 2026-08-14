@@ -181,6 +181,7 @@ class Gaussians(torch.nn.Module):
             self._densification_info = self._densification_info[:, valid_mask].contiguous()
 
     def reset_densification_info(self):
+        """Resets the densification info buffers to zero."""
         self._densification_info = torch.zeros((2, self._means.shape[0]), dtype=torch.float32, device='cuda')
 
     def split(self, grads: torch.Tensor, grad_threshold: float) -> torch.Tensor:

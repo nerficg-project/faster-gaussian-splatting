@@ -155,7 +155,6 @@ class FasterGSBasisTrainer(GuiTrainer):
         Logger.log_info(f'final number of Gaussians: {n_gaussians:,}')
         with open(str(self.output_directory / 'n_gaussians.txt'), 'w') as n_gaussians_file:
             n_gaussians_file.write(
-                f'Final number of Gaussians: {n_gaussians:,}\n'
-                f'\n'
+                f'Final number of Gaussians: {n_gaussians:,}\n\n'
                 f'N_Gaussians:{n_gaussians}'
             )
