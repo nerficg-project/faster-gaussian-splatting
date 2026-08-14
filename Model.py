@@ -273,7 +273,7 @@ class Gaussians(torch.nn.Module):
         if self._densification_info is not None:
             self._densification_info = self._densification_info[:, ordering].contiguous()
 
-    def reset_densification_info(self):
+    def reset_densification_info(self) -> None:
         """Resets the densification info buffers to zero."""
         self._densification_info = torch.zeros((2, self._spatial_means.shape[0]), dtype=torch.float32, device='cuda')
 
