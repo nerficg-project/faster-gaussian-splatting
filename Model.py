@@ -158,9 +158,9 @@ class Gaussians(torch.nn.Module):
         max_focal = 1e-12
         for view in dataset:
             if not isinstance(view.camera, PerspectiveCamera):
-                raise Framework.ModelError('update3dfilter only supports perspective cameras')
+                raise Framework.ModelError('3d filter only supports perspective cameras')
             if view.camera.distortion is not None:
-                Logger.log_warning('update3dfilter ignores all distortion parameters')
+                Logger.log_warning('3d filter ignores all distortion parameters')
             max_focal = max(max_focal, max(view.camera.focal_x, view.camera.focal_y))
         # assume max_focal is focal length of the highest resolution camera
         self.distance2filter = math.sqrt(filter_config.FILTER_VARIANCE) / max_focal
@@ -173,9 +173,9 @@ class Gaussians(torch.nn.Module):
         visibility_mask = torch.zeros((positions.shape[0], 1), device=positions.device, dtype=torch.bool)
         for view in dataset:
             if not isinstance(view.camera, PerspectiveCamera):
-                raise Framework.ModelError('update3dfilter only supports perspective cameras')
+                raise Framework.ModelError('3d filter only supports perspective cameras')
             if view.camera.distortion is not None:
-                Logger.log_warning('update3dfilter ignores all distortion parameters')
+                Logger.log_warning('3d filter ignores all distortion parameters')
             update_3d_filter(
                 positions,
                 view.w2c,
@@ -306,6 +306,7 @@ class Gaussians(torch.nn.Module):
             self._filter_3d = self._filter_3d[ordering].contiguous()
 
     def reset_densification_info(self):
+        """Resets the densification info buffers to zero."""
         self._densification_info = torch.zeros((2, self._means.shape[0]), dtype=torch.float32, device='cuda')
 
     def adaptive_density_control(self, grad_threshold: float, min_opacity: float, prune_large_gaussians: bool) -> None:

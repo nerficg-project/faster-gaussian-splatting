@@ -32,8 +32,8 @@ from Optim.Samplers.DatasetSamplers import DatasetSampler
     MAX_PRIMITIVES=1_000_000,  # only used when USE_MCMC=True
     OPACITY_RESET_INTERVAL=3_000,  # will be skipped when USE_MCMC=True
     EXTRA_OPACITY_RESET_ITERATION=500,  # will be skipped when USE_MCMC=True
-    MORTON_ORDERING_INTERVAL=5000,  # lowering to 2500 or 1000 may improve performance when number of Gaussians is high
-    MORTON_ORDERING_END_ITERATION=15000,  # should be set to 25000 when using MCMC
+    MORTON_ORDERING_INTERVAL=5_000,  # lowering to 2500 or 1000 may improve performance when number of Gaussians is high
+    MORTON_ORDERING_END_ITERATION=15_000,  # should be set to 25000 when using MCMC
     FILTER_3D=Framework.ConfigParameterList(
         USE=False,
         ORIGINAL_FORMULATION=False,  # if True, the original formulation from the Mip-Splatting paper is used
@@ -226,19 +226,17 @@ class FasterGSTrainer(GuiTrainer):
         Logger.log_info(f'final number of Gaussians: {n_gaussians:,}')
         with open(str(self.output_directory / 'n_gaussians.txt'), 'w') as n_gaussians_file:
             n_gaussians_file.write(
-                f'Final number of Gaussians: {n_gaussians:,}\n'
-                f'\n'
+                f'Final number of Gaussians: {n_gaussians:,}\n\n'
                 f'N_Gaussians:{n_gaussians}'
             )
         if self.model.ppisp is not None and self.model.ppisp.config.controller_distillation:
-            Logger.log_info(f'distilling PPISP controller')
             with torch.enable_grad():
                 self.model.train()
                 dataset.train()
                 self.loss.train()
                 self.loss.update_loss_weight('OPACITY_REGULARIZATION', 0.0)
                 self.loss.update_loss_weight('SCALE_REGULARIZATION', 0.0)
-                for _ in Logger.log_progress(range(self.model.ppisp.config.controller_training_steps)):
+                for _ in Logger.log_progress(range(self.model.ppisp.config.controller_training_steps), desc='distilling PPISP controller'):
                     # get random view
                     view = self.train_sampler.get(dataset=dataset)['view']
                     # render
