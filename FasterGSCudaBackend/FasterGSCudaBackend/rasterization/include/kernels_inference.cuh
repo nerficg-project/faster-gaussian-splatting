@@ -23,10 +23,9 @@ namespace faster_gs::rasterization::kernels::inference {
         uint* __restrict__ primitive_depth_keys,
         uint* __restrict__ primitive_indices,
         uint* __restrict__ primitive_n_touched_tiles,
-        ushort4* __restrict__ primitive_screen_bounds,
-        float2* __restrict__ primitive_mean2d,
+        float4* __restrict__ primitive_geometry,
         float4* __restrict__ primitive_conic_opacity,
-        float3* __restrict__ primitive_color,
+        float4* __restrict__ primitive_color_rgba,
         uint* __restrict__ n_visible_primitives,
         uint* __restrict__ n_instances,
         const uint n_primitives,
@@ -162,13 +161,19 @@ namespace faster_gs::rasterization::kernels::inference {
         const float cutoff_factor = 2.0f * power_threshold;
         const float extent_x = fmaxf(sqrtf(cov2d.x * cutoff_factor) - 0.5f, 0.0f);
         const float extent_y = fmaxf(sqrtf(cov2d.z * cutoff_factor) - 0.5f, 0.0f);
-        const uint4 screen_bounds = make_uint4(
-            min(grid_width, static_cast<uint>(max(0, __float2int_rd((mean2d.x - extent_x) / static_cast<float>(config::tile_width))))), // x_min
-            min(grid_width, static_cast<uint>(max(0, __float2int_ru((mean2d.x + extent_x) / static_cast<float>(config::tile_width))))), // x_max
-            min(grid_height, static_cast<uint>(max(0, __float2int_rd((mean2d.y - extent_y) / static_cast<float>(config::tile_height))))), // y_min
-            min(grid_height, static_cast<uint>(max(0, __float2int_ru((mean2d.y + extent_y) / static_cast<float>(config::tile_height))))) // y_max
+        const ushort4 screen_bounds = make_ushort4(
+            min(static_cast<ushort>(width), max(0, __float2int_rd(mean2d.x - extent_x))), // x_min
+            min(static_cast<ushort>(width), max(0, __float2int_ru(mean2d.x + extent_x))), // x_max
+            min(static_cast<ushort>(height), max(0, __float2int_rd(mean2d.y - extent_y))), // y_min
+            min(static_cast<ushort>(height), max(0, __float2int_ru(mean2d.y + extent_y))) // y_max
         );
-        const uint n_touched_tiles_max = (screen_bounds.y - screen_bounds.x) * (screen_bounds.w - screen_bounds.z);
+        const uint4 tile_bounds = make_uint4(
+            screen_bounds.x / config::tile_width,
+            __float2int_ru(static_cast<float>(screen_bounds.y) / config::tile_width),
+            screen_bounds.z / config::tile_height,
+            __float2int_ru(static_cast<float>(screen_bounds.w) / config::tile_height)
+        );
+        const uint n_touched_tiles_max = (tile_bounds.y - tile_bounds.x) * (tile_bounds.w - tile_bounds.z);
         if (n_touched_tiles_max == 0) active = false;
 
         // early exit if whole warp is inactive
@@ -176,7 +181,7 @@ namespace faster_gs::rasterization::kernels::inference {
 
         // compute exact number of tiles the primitive overlaps
         const uint n_touched_tiles = compute_exact_n_touched_tiles(
-            mean2d, conic, screen_bounds,
+            mean2d, conic, tile_bounds,
             power_threshold, n_touched_tiles_max, active
         );
 
@@ -185,20 +190,19 @@ namespace faster_gs::rasterization::kernels::inference {
 
         // store results
         primitive_n_touched_tiles[primitive_idx] = n_touched_tiles;
-        primitive_screen_bounds[primitive_idx] = make_ushort4(
-            static_cast<ushort>(screen_bounds.x),
-            static_cast<ushort>(screen_bounds.y),
-            static_cast<ushort>(screen_bounds.z),
-            static_cast<ushort>(screen_bounds.w)
+        primitive_geometry[primitive_idx] = make_float4(
+            mean2d.x,
+            mean2d.y,
+            __uint_as_float(pack_bounds_xy(screen_bounds.x, screen_bounds.y)),
+            __uint_as_float(pack_bounds_xy(screen_bounds.z, screen_bounds.w))
         );
-        primitive_mean2d[primitive_idx] = mean2d;
         primitive_conic_opacity[primitive_idx] = make_float4(conic, opacity);
         const float3 color = convert_sh_to_color(
             sh_coefficients_0, sh_coefficients_rest,
             mean3d, cam_position[0],
             primitive_idx, active_sh_bases, total_sh_bases
         );
-        primitive_color[primitive_idx] = fmaxf(color, 0.0f);
+        primitive_color_rgba[primitive_idx] = make_float4(fmaxf(color, 0.0f), 0.0f);
 
         const uint offset = atomicAdd(n_visible_primitives, 1);
         const uint depth_key = __float_as_uint(depth);
@@ -224,8 +228,7 @@ namespace faster_gs::rasterization::kernels::inference {
     __global__ void create_instances_cu(
         const uint* __restrict__ primitive_indices_sorted,
         const uint* __restrict__ primitive_offsets,
-        const ushort4* __restrict__ primitive_screen_bounds,
-        const float2* __restrict__ primitive_mean2d,
+        const float4* __restrict__ primitive_geometry,
         const float4* __restrict__ primitive_conic_opacity,
         KeyT* __restrict__ instance_keys,
         uint* __restrict__ instance_primitive_indices,
@@ -253,10 +256,17 @@ namespace faster_gs::rasterization::kernels::inference {
 
         const uint primitive_idx = primitive_indices_sorted[original_idx];
 
-        const ushort4 screen_bounds = primitive_screen_bounds[primitive_idx];
-        const uint screen_bounds_width = static_cast<uint>(screen_bounds.y - screen_bounds.x);
-        const uint instance_count = static_cast<uint>(screen_bounds.w - screen_bounds.z) * screen_bounds_width;
-        const float2 mean2d = primitive_mean2d[primitive_idx];
+        const float4 geometry_record = primitive_geometry[primitive_idx];
+        const ushort4 screen_bounds = unpack_screen_bounds_from_geometry(geometry_record);
+        const ushort4 tile_bounds = make_ushort4(
+            screen_bounds.x / config::tile_width,
+            __float2int_ru(static_cast<float>(screen_bounds.y) / config::tile_width),
+            screen_bounds.z / config::tile_height,
+            __float2int_ru(static_cast<float>(screen_bounds.w) / config::tile_height)
+        );
+        const uint tile_bounds_width = tile_bounds.y - tile_bounds.x;
+        const uint instance_count = (tile_bounds.w - tile_bounds.z) * tile_bounds_width;
+        const float2 mean2d = make_float2(geometry_record.x, geometry_record.y);
         const float2 mean2d_shifted = mean2d - 0.5f;
         const float4 conic_opacity = primitive_conic_opacity[primitive_idx];
         const float3 conic = make_float3(conic_opacity);
@@ -266,8 +276,8 @@ namespace faster_gs::rasterization::kernels::inference {
         uint current_write_offset = primitive_offsets[original_idx];
 
         for (uint instance_idx = 0; active && instance_idx < instance_count && instance_idx < config::n_sequential_threshold; instance_idx++) {
-            const uint tile_x = screen_bounds.x + (instance_idx % screen_bounds_width);
-            const uint tile_y = screen_bounds.z + (instance_idx / screen_bounds_width);
+            const uint tile_x = tile_bounds.x + (instance_idx % tile_bounds_width);
+            const uint tile_y = tile_bounds.z + (instance_idx / tile_bounds_width);
             if (will_primitive_contribute(mean2d_shifted, conic, tile_x, tile_y, power_threshold)) {
                 const uint tile_idx = tile_y * grid_width + tile_x;
                 const KeyT instance_key = static_cast<KeyT>(tile_idx);
@@ -281,10 +291,10 @@ namespace faster_gs::rasterization::kernels::inference {
         const uint remaining_threads = warp.ballot(compute_cooperatively);
         if (remaining_threads == 0) return;
 
-        __shared__ ushort4 collected_screen_bounds[config::block_size_create_instances];
+        __shared__ ushort4 collected_tile_bounds[config::block_size_create_instances];
         __shared__ float2 collected_mean2d_shifted[config::block_size_create_instances];
         __shared__ float4 collected_conic_power_threshold[config::block_size_create_instances];
-        collected_screen_bounds[thread_rank] = screen_bounds;
+        collected_tile_bounds[thread_rank] = tile_bounds;
         collected_mean2d_shifted[thread_rank] = mean2d_shifted;
         collected_conic_power_threshold[thread_rank] = make_float4(conic, power_threshold);
 
@@ -295,12 +305,12 @@ namespace faster_gs::rasterization::kernels::inference {
             uint current_write_offset_coop = warp.shfl(current_write_offset, current_lane);
 
             const uint read_offset_shared = warp_start + current_lane;
-            const ushort4 screen_bounds_coop = collected_screen_bounds[read_offset_shared];
+            const ushort4 tile_bounds_coop = collected_tile_bounds[read_offset_shared];
             const float2 mean2d_shifted_coop = collected_mean2d_shifted[read_offset_shared];
             const float4 conic_power_threshold_coop = collected_conic_power_threshold[read_offset_shared];
 
-            const uint screen_bounds_width_coop = static_cast<uint>(screen_bounds_coop.y - screen_bounds_coop.x);
-            const uint instance_count_coop = screen_bounds_width_coop * static_cast<uint>(screen_bounds_coop.w - screen_bounds_coop.z);
+            const uint tile_bounds_width_coop = static_cast<uint>(tile_bounds_coop.y - tile_bounds_coop.x);
+            const uint instance_count_coop = tile_bounds_width_coop * static_cast<uint>(tile_bounds_coop.w - tile_bounds_coop.z);
             const float3 conic_coop = make_float3(conic_power_threshold_coop);
             const float power_threshold_coop = conic_power_threshold_coop.w;
 
@@ -308,8 +318,8 @@ namespace faster_gs::rasterization::kernels::inference {
             const uint n_iterations = div_round_up(remaining_instance_count, warp_size);
             for (uint i = 0; i < n_iterations; i++) {
                 const uint instance_idx = i * warp_size + lane_idx + config::n_sequential_threshold;
-                const uint tile_x = screen_bounds_coop.x + (instance_idx % screen_bounds_width_coop);
-                const uint tile_y = screen_bounds_coop.z + (instance_idx / screen_bounds_width_coop);
+                const uint tile_x = tile_bounds_coop.x + (instance_idx % tile_bounds_width_coop);
+                const uint tile_y = tile_bounds_coop.z + (instance_idx / tile_bounds_width_coop);
                 const bool write = instance_idx < instance_count_coop && will_primitive_contribute(mean2d_shifted_coop, conic_coop, tile_x, tile_y, power_threshold_coop);
                 const uint write_ballot = warp.ballot(write);
                 if (write) {
@@ -349,9 +359,9 @@ namespace faster_gs::rasterization::kernels::inference {
     __global__ void __launch_bounds__(config::block_size_blend) blend_cu(
         const uint2* __restrict__ tile_instance_ranges,
         const uint* __restrict__ instance_primitive_indices,
-        const float2* __restrict__ primitive_mean2d,
+        const float4* __restrict__ primitive_geometry,
         const float4* __restrict__ primitive_conic_opacity,
-        const float3* __restrict__ primitive_color,
+        const float4* __restrict__ primitive_color_rgba,
         const float3* __restrict__ bg_color,
         float* __restrict__ image,
         const uint width,
@@ -362,60 +372,91 @@ namespace faster_gs::rasterization::kernels::inference {
     {
         auto block = cg::this_thread_block();
         const dim3 group_index = block.group_index();
-        const dim3 thread_index = block.thread_index();
+        const uint tile_origin_x = group_index.x * config::tile_width;
+        const uint tile_origin_y = group_index.y * config::tile_height;
         const uint thread_rank = block.thread_rank();
-        const uint2 pixel_coords = make_uint2(group_index.x * config::tile_width + thread_index.x, group_index.y * config::tile_height + thread_index.y);
+
+        auto warp = cg::tiled_partition<config::warp_size>(block);
+        const uint lane_rank = warp.thread_rank();
+        const uint warp_rank = warp.meta_group_rank();
+        const uint subtile_x = warp_rank % config::subtile_per_row;
+        const uint subtile_y = warp_rank / config::subtile_per_row;
+        const uint subtile_origin_x = tile_origin_x + subtile_x * config::warp_tile_width;
+        const uint subtile_origin_y = tile_origin_y + subtile_y * config::warp_tile_height;
+        const ushort4 subtile_bounds = make_ushort4(
+            subtile_origin_x,
+            subtile_origin_x + config::warp_tile_width,
+            subtile_origin_y,
+            subtile_origin_y + config::warp_tile_height
+        );
+
+        const uint2 pixel_coords = make_uint2(
+            subtile_origin_x + lane_rank % config::warp_tile_width,
+            subtile_origin_y + lane_rank / config::warp_tile_width
+        );
         const bool inside = pixel_coords.x < width && pixel_coords.y < height;
         const float2 pixel = make_float2(__uint2float_rn(pixel_coords.x), __uint2float_rn(pixel_coords.y)) + 0.5f;
-        // setup shared memory
-        __shared__ float2 collected_mean2d[config::block_size_blend];
-        __shared__ float4 collected_conic_opacity[config::block_size_blend];
-        __shared__ float3 collected_color[config::block_size_blend];
-        // initialize local storage
+
+        __shared__ float4 collected_geometry[config::warp_fetch_size];
+        __shared__ float4 collected_conic_opacity[config::warp_fetch_size];
+        __shared__ float4 collected_color[config::warp_fetch_size];
+
         float3 color_pixel = make_float3(0.0f);
         float transmittance = 1.0f;
         bool done = !inside;
-        // collaborative loading and processing
+
         const uint2 tile_range = tile_instance_ranges[group_index.y * grid_width + group_index.x];
-        for (int n_points_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + thread_rank; n_points_remaining > 0; n_points_remaining -= config::block_size_blend, current_fetch_idx += config::block_size_blend) {
-            if (__syncthreads_count(done) == config::block_size_blend) break;
-            if (current_fetch_idx < tile_range.y) {
+        for (int n_points_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + thread_rank;
+            n_points_remaining > 0;
+            n_points_remaining -= config::warp_fetch_size, current_fetch_idx += config::warp_fetch_size) {
+            if (__syncthreads_and(done)) break;
+
+            if (current_fetch_idx < tile_range.y && thread_rank < config::warp_fetch_size) {
                 const uint primitive_idx = instance_primitive_indices[current_fetch_idx];
-                collected_mean2d[thread_rank] = primitive_mean2d[primitive_idx];
+                collected_geometry[thread_rank] = primitive_geometry[primitive_idx];
                 collected_conic_opacity[thread_rank] = primitive_conic_opacity[primitive_idx];
-                collected_color[thread_rank] = primitive_color[primitive_idx];
+                collected_color[thread_rank] = primitive_color_rgba[primitive_idx];
             }
             block.sync();
-            const int current_batch_size = min(config::block_size_blend, n_points_remaining);
-            for (int j = 0; !done && j < current_batch_size; ++j) {
-                // evaluate current Gaussian at pixel
-                const float4 conic_opacity = collected_conic_opacity[j];
-                const float3 conic = make_float3(conic_opacity);
-                const float opacity = conic_opacity.w;
-                const float2 delta = collected_mean2d[j] - pixel;
-                const float exponent = -0.5f * (conic.x * delta.x * delta.x + conic.z * delta.y * delta.y) - conic.y * delta.x * delta.y;
-                const float gaussian = expf(fminf(exponent, 0.0f));
-                if (!config::original_opacity_interpretation && gaussian < config::min_alpha_threshold) continue;
-                const float alpha = opacity * gaussian;
-                if (config::original_opacity_interpretation && alpha < config::min_alpha_threshold) continue;
+            const int current_batch_size = min(config::warp_fetch_size, n_points_remaining);
 
-                // blend fragment into pixel color
-                color_pixel += transmittance * alpha * collected_color[j];
+            #pragma unroll
+            for (int warp_fetch_iterations = 0; warp_fetch_iterations < config::warp_fetch_size / config::warp_size; ++warp_fetch_iterations) {
+                bool subtile_hit = false;
+                const int fetch_base = warp_fetch_iterations * config::warp_size;
+                if (fetch_base + lane_rank < current_batch_size) {
+                    const float4 geometry_record = collected_geometry[fetch_base + lane_rank];
+                    const ushort4 splat_bounds = unpack_screen_bounds_from_geometry(geometry_record);
+                    subtile_hit = splat_bounds.x < subtile_bounds.y &&
+                        subtile_bounds.x < splat_bounds.y &&
+                        splat_bounds.z < subtile_bounds.w &&
+                        subtile_bounds.z < splat_bounds.w;
+                }
+                uint pending_splats = warp.ballot(subtile_hit);
+                while (!done && pending_splats != 0u) {
+                    const int j = __ffs(static_cast<int>(pending_splats)) - 1;
+                    pending_splats &= pending_splats - 1;
 
-                // update transmittance
-                transmittance *= 1.0f - alpha;
+                    const float4 conic_opacity = collected_conic_opacity[fetch_base + j];
+                    const float3 conic = make_float3(conic_opacity);
+                    const float opacity = conic_opacity.w;
+                    const float4 geometry_record = collected_geometry[fetch_base + j];
+                    const float2 delta = make_float2(geometry_record.x, geometry_record.y) - pixel;
+                    const float exponent = -0.5f * (conic.x * delta.x * delta.x + conic.z * delta.y * delta.y) - conic.y * delta.x * delta.y;
+                    const float gaussian = expf(fminf(exponent, 0.0f));
+                    if (!config::original_opacity_interpretation && gaussian < config::min_alpha_threshold) continue;
+                    const float alpha = opacity * gaussian;
+                    if (config::original_opacity_interpretation && alpha < config::min_alpha_threshold) continue;
 
-                // early stopping
-                if (transmittance < config::transmittance_threshold) {
-                    done = true;
-                    continue;
+                    color_pixel += transmittance * alpha * make_float3(collected_color[fetch_base + j]);
+                    transmittance *= 1.0f - alpha;
+                    if (transmittance < config::transmittance_threshold) done = true;
                 }
             }
         }
+
         if (inside) {
-            // apply background color
             color_pixel += transmittance * bg_color[0];
-            // store results
             const uint pixel_idx = width * pixel_coords.y + pixel_coords.x;
             if (clamp_output) {
                 color_pixel.x = __saturatef(color_pixel.x);

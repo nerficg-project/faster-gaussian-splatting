@@ -17,6 +17,21 @@ namespace faster_gs::rasterization {
         return 32 - leading_zeros;
     }
 
+    __device__ __forceinline__ uint pack_bounds_xy(ushort min_bound, ushort max_bound) {
+        return static_cast<uint>(min_bound) | (static_cast<uint>(max_bound) << 16);
+    }
+
+    __device__ __forceinline__ ushort4 unpack_screen_bounds_from_geometry(const float4 geometry_record) {
+        const uint packed_x = __float_as_uint(geometry_record.z);
+        const uint packed_y = __float_as_uint(geometry_record.w);
+        return make_ushort4(
+            static_cast<ushort>(packed_x & 0xFFFFu),
+            static_cast<ushort>((packed_x >> 16) & 0xFFFFu),
+            static_cast<ushort>(packed_y & 0xFFFFu),
+            static_cast<ushort>((packed_y >> 16) & 0xFFFFu)
+        );
+    }
+
     struct mat3x3 {
         float m11, m12, m13;
         float m21, m22, m23;
@@ -51,8 +66,10 @@ namespace faster_gs::rasterization {
         uint* offset;
         ushort4* screen_bounds;
         float2* mean2d;
+        float4* geometry;
         float4* conic_opacity;
         float3* color;
+        float4* color_rgba;
         uint* n_visible_primitives;
         uint* n_instances;
 
@@ -72,8 +89,10 @@ namespace faster_gs::rasterization {
             obtain(blob, buffers.offset, n_primitives);
             obtain(blob, buffers.screen_bounds, n_primitives);
             obtain(blob, buffers.mean2d, n_primitives);
+            obtain(blob, buffers.geometry, n_primitives);
             obtain(blob, buffers.conic_opacity, n_primitives);
             obtain(blob, buffers.color, n_primitives);
+            obtain(blob, buffers.color_rgba, n_primitives);
             cub::DeviceScan::ExclusiveSum(
                 nullptr, buffers.cub_workspace_size,
                 buffers.offset, buffers.offset,
