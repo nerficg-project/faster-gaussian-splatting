@@ -397,14 +397,17 @@ namespace faster_gs::rasterization::kernels::inference {
         const bool inside = pixel_coords.x < width && pixel_coords.y < height;
         const float2 pixel = make_float2(__uint2float_rn(pixel_coords.x), __uint2float_rn(pixel_coords.y)) + 0.5f;
 
+        // setup shared memory
         __shared__ float4 collected_geometry[config::warp_fetch_size];
         __shared__ float4 collected_conic_opacity[config::warp_fetch_size];
         __shared__ float4 collected_color[config::warp_fetch_size];
 
+        // initialize local storage
         float3 color_pixel = make_float3(0.0f);
         float transmittance = 1.0f;
         bool done = !inside;
 
+        // collaborative loading and processing
         const uint2 tile_range = tile_instance_ranges[group_index.y * grid_width + group_index.x];
         for (int n_points_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + thread_rank;
             n_points_remaining > 0;
@@ -437,6 +440,7 @@ namespace faster_gs::rasterization::kernels::inference {
                     const int j = __ffs(static_cast<int>(pending_splats)) - 1;
                     pending_splats &= pending_splats - 1;
 
+                    // evaluate current Gaussian at pixel
                     const float4 conic_opacity = collected_conic_opacity[fetch_base + j];
                     const float3 conic = make_float3(conic_opacity);
                     const float opacity = conic_opacity.w;
@@ -448,15 +452,23 @@ namespace faster_gs::rasterization::kernels::inference {
                     const float alpha = opacity * gaussian;
                     if (config::original_opacity_interpretation && alpha < config::min_alpha_threshold) continue;
 
+                    // blend fragment into pixel color
                     color_pixel += transmittance * alpha * make_float3(collected_color[fetch_base + j]);
+
+                    // update transmittance
                     transmittance *= 1.0f - alpha;
+
+                    // early stopping
                     if (transmittance < config::transmittance_threshold) done = true;
                 }
             }
         }
 
         if (inside) {
+            // apply background color
             color_pixel += transmittance * bg_color[0];
+
+            // store results
             const uint pixel_idx = width * pixel_coords.y + pixel_coords.x;
             if (clamp_output) {
                 color_pixel.x = __saturatef(color_pixel.x);
