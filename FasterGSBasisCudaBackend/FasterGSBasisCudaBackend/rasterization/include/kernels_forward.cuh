@@ -241,8 +241,8 @@ namespace faster_gs::rasterization::kernels::forward {
         bool done = !inside;
         // collaborative loading and processing
         const uint2 tile_range = tile_instance_ranges[group_index.y * grid_width + group_index.x];
-        for (int n_points_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + thread_rank; n_points_remaining > 0; n_points_remaining -= config::block_size_blend, current_fetch_idx += config::block_size_blend) {
-            if (__syncthreads_count(done) == config::block_size_blend) break;
+        for (int n_primitives_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + thread_rank; n_primitives_remaining > 0; n_primitives_remaining -= config::block_size_blend, current_fetch_idx += config::block_size_blend) {
+            if (__syncthreads_and(done)) break;
             if (current_fetch_idx < tile_range.y) {
                 const uint primitive_idx = instance_primitive_indices[current_fetch_idx];
                 collected_mean2d[thread_rank] = primitive_mean2d[primitive_idx];
@@ -251,7 +251,7 @@ namespace faster_gs::rasterization::kernels::forward {
                 collected_color[thread_rank] = color;
             }
             block.sync();
-            const int current_batch_size = min(config::block_size_blend, n_points_remaining);
+            const int current_batch_size = min(config::block_size_blend, n_primitives_remaining);
             for (int j = 0; !done && j < current_batch_size; ++j) {
                 // evaluate current Gaussian at pixel
                 const float4 conic_opacity = collected_conic_opacity[j];
@@ -282,10 +282,7 @@ namespace faster_gs::rasterization::kernels::forward {
                 transmittance = next_transmittance;
 
                 // early stopping (if not config::original_stability_measures)
-                if (!config::original_stability_measures && transmittance < config::transmittance_threshold) {
-                    done = true;
-                    continue;
-                }
+                if (!config::original_stability_measures && transmittance < config::transmittance_threshold) done = true;
             }
         }
         if (inside) {
