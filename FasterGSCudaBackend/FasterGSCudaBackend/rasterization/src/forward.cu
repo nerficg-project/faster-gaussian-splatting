@@ -240,6 +240,7 @@ void faster_gs::rasterization::diff_rasterize(
         tile_buffers.instance_ranges,
         tile_buffers.buckets_offset,
         instance_buffers.primitive_indices.Current(),
+        primitive_buffers.screen_bounds,
         primitive_buffers.mean2d,
         primitive_buffers.conic_opacity,
         primitive_buffers.color,
