@@ -50,10 +50,14 @@ namespace faster_gs::rasterization::config {
     DEF int block_size_create_instances = 256;
     DEF int block_size_extract_instance_ranges = 256;
     DEF int block_size_extract_bucket_counts = 256;
-    DEF int tile_width = 16;
-    DEF int tile_height = 16;
-    DEF int block_size_blend = tile_width * tile_height;
+    // algorithmic constants (do not change unless you know what you're doing)
     DEF int n_sequential_threshold = 4;
+    DEF int tile_width = 16;
+    DEF int tile_height = 12;
+    DEF int block_size_blend = tile_width * tile_height; // 192
+    DEF int subtile_width = 8;
+    DEF int subtile_height = 4;
+    DEF int subgrid_width = tile_width / subtile_width; // 2
 }
 
 namespace config = faster_gs::rasterization::config;

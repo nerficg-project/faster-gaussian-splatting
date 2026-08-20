@@ -32,6 +32,7 @@ The `main` branch provides our fast 3DGS implementation with many additional fea
 - Random background color training to reduce false transparency
 - Even faster training through informed pruning from [Speedy-Splat](https://speedysplat.github.io/)
 - Handling of photometric variations in input images through [PPISP](https://research.nvidia.com/labs/sil/projects/ppisp/)
+- Warp-level culling for efficient blending from [Warp-Level Culling](https://plse-splats.github.io/faster-gaussian-splatting/)
 
 On the `FasterGSFused` branch, we went full nerd-mode and fused the backward pass and optimizer. It provides an additional speedup over our default implementation and also uses less VRAM. And the best part is that the code is still pretty clean. Great if you need every bit of performance or just like to train extra fast.
 
@@ -137,6 +138,7 @@ We thank the authors of the following works, whose ideas and open-source impleme
 - Kheradmand et al. [_3D Gaussian Splatting as Markov Chain Monte Carlo._](https://ubc-vision.github.io/3dgs-mcmc/) NeurIPS 2024.
 - Hanson et al. [_Speedy-Splat: Fast 3D Gaussian Splatting with Sparse Pixels and Sparse Primitives._](https://speedysplat.github.io/) CVPR 2025.
 - Deutsch et al. [_PPISP: Physically-Plausible Compensation and Control of Photometric Variations in Radiance Field Reconstruction._](https://research.nvidia.com/labs/sil/projects/ppisp/) CVPR 2026.
+- Yang et al. [_Warp-Level Culling for Efficient Blending in 3D Gaussian Splatting._](https://plse-splats.github.io/faster-gaussian-splatting/) HPG 2026.
 
 We also thank [Janusch Patas (aka. MrNeRF)](https://github.com/MrNeRF) for partially inspiring this project with his open-source bounty for [LichtFeld Studio](https://lichtfeld.io/), where an early version of our work was the [winning submission](https://github.com/MrNeRF/LichtFeld-Studio/pull/245) and has since become one of its core components.
 
