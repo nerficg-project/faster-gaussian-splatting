@@ -373,7 +373,7 @@ namespace faster_gs::rasterization::kernels::forward {
             power_threshold, n_touched_tiles_max, active
         );
 
-         // cooperative threads no longer needed
+        // cooperative threads no longer needed
         if (n_touched_tiles == 0 || !active) return;
 
         // store results

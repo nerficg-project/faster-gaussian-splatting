@@ -362,7 +362,7 @@ namespace faster_gs::rasterization::kernels::forward {
             power_threshold, n_touched_tiles_max, active
         );
 
-         // cooperative threads no longer needed
+        // cooperative threads no longer needed
         if (n_touched_tiles == 0 || !active) return;
 
         // store results
@@ -689,8 +689,8 @@ namespace faster_gs::rasterization::kernels::forward {
         bool done = !inside;
         // collaborative loading and processing
         const uint2 tile_range = tile_instance_ranges[group_index.y * grid_width + group_index.x];
-        for (int n_points_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + thread_rank; n_points_remaining > 0; n_points_remaining -= config::block_size_blend, current_fetch_idx += config::block_size_blend) {
-            if (__syncthreads_count(done) == config::block_size_blend) break;
+        for (int n_primitives_remaining = tile_range.y - tile_range.x, current_fetch_idx = tile_range.x + thread_rank; n_primitives_remaining > 0; n_primitives_remaining -= config::block_size_blend, current_fetch_idx += config::block_size_blend) {
+            if (__syncthreads_and(done)) break;
             if (current_fetch_idx < tile_range.y) {
                 const uint primitive_idx = instance_primitive_indices[current_fetch_idx];
                 collected_mean2d[thread_rank] = primitive_mean2d[primitive_idx];
@@ -699,7 +699,7 @@ namespace faster_gs::rasterization::kernels::forward {
                 collected_color[thread_rank] = color;
             }
             block.sync();
-            const int current_batch_size = min(config::block_size_blend, n_points_remaining);
+            const int current_batch_size = min(config::block_size_blend, n_primitives_remaining);
             for (int j = 0; !done && j < current_batch_size; ++j) {
                 // evaluate current Gaussian at pixel
                 const float4 conic_opacity = collected_conic_opacity[j];
@@ -718,10 +718,7 @@ namespace faster_gs::rasterization::kernels::forward {
                 transmittance *= 1.0f - alpha;
 
                 // early stopping
-                if (transmittance < config::transmittance_threshold) {
-                    done = true;
-                    continue;
-                }
+                if (transmittance < config::transmittance_threshold) done = true;
             }
         }
         if (inside) {
@@ -765,9 +762,9 @@ namespace faster_gs::rasterization::kernels::forward {
         // setup tile info
         const uint tile_idx = group_index.y * grid_width + group_index.x;
         const uint2 tile_range = tile_instance_ranges[tile_idx];
-        const int n_points_total = tile_range.y - tile_range.x;
+        const int n_primitives_total = tile_range.y - tile_range.x;
         // setup bucket to tile mapping
-        const int n_buckets = div_round_up(n_points_total, 32);
+        const int n_buckets = div_round_up(n_primitives_total, 32);
         uint bucket_offset = (tile_idx == 0) ? 0 : tile_buckets_offset[tile_idx - 1];
         for (int n_buckets_remaining = n_buckets, current_bucket_idx = thread_rank; n_buckets_remaining > 0; n_buckets_remaining -= config::block_size_blend, current_bucket_idx += config::block_size_blend) {
             if (current_bucket_idx < n_buckets) bucket_tile_index[bucket_offset + current_bucket_idx] = tile_idx;
@@ -783,8 +780,8 @@ namespace faster_gs::rasterization::kernels::forward {
         uint n_processed_and_used = 0;
         bool done = !inside;
         // collaborative loading and processing
-        for (int n_points_remaining = n_points_total, current_fetch_idx = tile_range.x + thread_rank; n_points_remaining > 0; n_points_remaining -= config::block_size_blend, current_fetch_idx += config::block_size_blend) {
-            if (__syncthreads_count(done) == config::block_size_blend) break;
+        for (int n_primitives_remaining = n_primitives_total, current_fetch_idx = tile_range.x + thread_rank; n_primitives_remaining > 0; n_primitives_remaining -= config::block_size_blend, current_fetch_idx += config::block_size_blend) {
+            if (__syncthreads_and(done)) break;
             if (current_fetch_idx < tile_range.y) {
                 const uint primitive_idx = instance_primitive_indices[current_fetch_idx];
                 collected_mean2d[thread_rank] = primitive_mean2d[primitive_idx];
@@ -793,7 +790,7 @@ namespace faster_gs::rasterization::kernels::forward {
                 collected_color[thread_rank] = color;
             }
             block.sync();
-            const int current_batch_size = min(config::block_size_blend, n_points_remaining);
+            const int current_batch_size = min(config::block_size_blend, n_primitives_remaining);
             for (int j = 0; !done && j < current_batch_size; ++j) {
                 // store current color and transmittance every 32 Gaussians
                 if (j % 32 == 0) {
@@ -825,10 +822,7 @@ namespace faster_gs::rasterization::kernels::forward {
                 n_processed_and_used = n_processed;
 
                 // early stopping
-                if (transmittance < config::transmittance_threshold) {
-                    done = true;
-                    continue;
-                }
+                if (transmittance < config::transmittance_threshold) done = true;
             }
         }
         if (inside) {
