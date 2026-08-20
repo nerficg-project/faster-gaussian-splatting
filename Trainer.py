@@ -4,7 +4,7 @@ import torch
 
 import Framework
 from Datasets.Base import BaseDataset
-from Datasets.utils import BasicPointCloud, apply_background_color
+from Datasets.utils import BasicPointCloud, apply_background_color, get_supervision_alpha
 from Logging import Logger
 from Methods.Base.GuiTrainer import GuiTrainer
 from Methods.Base.utils import pre_training_callback, training_callback, post_training_callback
@@ -178,7 +178,6 @@ class FasterGSTrainer(GuiTrainer):
         self.model.gaussians.update_learning_rate(iteration + 1)
         # get random view
         view = self.train_sampler.get(dataset=dataset)['view']
-        # render
         bg_color = torch.rand_like(view.camera.background_color) if self.USE_RANDOM_BACKGROUND_COLOR else view.camera.background_color
         image = self.renderer.render_image_training(
             view=view,
@@ -188,8 +187,8 @@ class FasterGSTrainer(GuiTrainer):
         # calculate loss
         # compose gt with background color if needed  # FIXME: integrate into data model
         rgb_gt = view.rgb
-        if (alpha_gt := view.alpha) is not None:
-            rgb_gt = apply_background_color(rgb_gt, alpha_gt, bg_color)
+        if (supervision_alpha := get_supervision_alpha(view)) is not None:
+            rgb_gt = apply_background_color(rgb_gt, supervision_alpha, bg_color)
         loss = self.loss(image, rgb_gt)
         # backward
         loss.backward()
@@ -244,8 +243,8 @@ class FasterGSTrainer(GuiTrainer):
                     # calculate loss
                     # compose gt with background color if needed  # FIXME: integrate into data model
                     rgb_gt = view.rgb
-                    if (alpha_gt := view.alpha) is not None:
-                        rgb_gt = apply_background_color(rgb_gt, alpha_gt, view.camera.background_color)
+                    if (supervision_alpha := get_supervision_alpha(view)) is not None:
+                        rgb_gt = apply_background_color(rgb_gt, supervision_alpha, view.camera.background_color)
                     loss = self.loss(image, rgb_gt)
                     # backward
                     loss.backward()
