@@ -7,6 +7,7 @@
 #include "helper_math.h"
 #include "utils.h"
 #include <cooperative_groups.h>
+#include <cooperative_groups/reduce.h>
 namespace cg = cooperative_groups;
 
 namespace faster_gs::rasterization::kernels::forward {
@@ -491,10 +492,15 @@ namespace faster_gs::rasterization::kernels::forward {
             tile_n_processed[pixel_idx] = n_processed_and_used;
         }
         // max reduce the number of processed Gaussians per tile
-        typedef cub::BlockReduce<uint, config::tile_width, cub::BLOCK_REDUCE_WARP_REDUCTIONS, config::tile_height> BlockReduce;
-        __shared__ typename BlockReduce::TempStorage temp_storage;
-        n_processed_and_used = BlockReduce(temp_storage).Reduce(n_processed_and_used, cub::Max());
-        if (thread_rank == 0) tile_max_n_processed[tile_idx] = n_processed_and_used;
+        constexpr int n_warps = config::block_size_blend / 32;
+        __shared__ uint warp_max_n_processed[n_warps];
+        n_processed_and_used = cg::reduce(warp, n_processed_and_used, cg::greater<uint>());
+        if (lane_idx == 0) warp_max_n_processed[warp_idx] = n_processed_and_used;
+        block.sync();
+        if (thread_rank == 0) {
+            for (int i = 1; i < n_warps; ++i) n_processed_and_used = max(n_processed_and_used, warp_max_n_processed[i]);
+            tile_max_n_processed[tile_idx] = n_processed_and_used;
+        }
     }
 
 }
