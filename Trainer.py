@@ -204,7 +204,7 @@ class FasterGSTrainer(GuiTrainer):
     @torch.no_grad()
     def hard_pruning(self, iteration: int, dataset: 'BaseDataset') -> None:
         """Speedy-Splat Hard Pruning (see https://github.com/j-alex-hanson/speedy-splat/blob/e480b2c3944e4aac4e251307216fe1b8d6a0afc3/train.py#L202-L213)."""
-        if iteration >= self.DENSIFICATION_END_ITERATION + self.DENSIFICATION_INTERVAL:
+        if not self.USE_MCMC and iteration >= self.DENSIFICATION_END_ITERATION + self.DENSIFICATION_INTERVAL:
             scores = self.renderer.compute_pruning_scores(dataset.train())
             self.model.gaussians.importance_pruning(scores, pruning_ratio=self.SPEEDYSPLAT_PRUNING.HARD_PRUNING_RATIO)
 
