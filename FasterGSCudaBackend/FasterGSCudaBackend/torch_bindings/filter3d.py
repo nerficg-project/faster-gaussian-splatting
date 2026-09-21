@@ -15,6 +15,7 @@ def update_3d_filter(
     center_x: float,
     center_y: float,
     near_plane: float,
+    far_plane: float,
     clipping_tolerance: float,
     distance2filter: float,
 ) -> None:
@@ -30,6 +31,7 @@ def update_3d_filter(
         center_x,
         center_y,
         near_plane,
+        far_plane,
         clipping_tolerance,
         distance2filter,
     )

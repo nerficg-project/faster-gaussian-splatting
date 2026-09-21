@@ -16,6 +16,7 @@ namespace faster_gs::filter3d {
         const float center_x,
         const float center_y,
         const float near_plane,
+        const float far_plane,
         const float clipping_tolerance,
         const float distance2filter);
 

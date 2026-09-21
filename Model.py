@@ -188,6 +188,7 @@ class Gaussians(torch.nn.Module):
                 view.camera.center_x,
                 view.camera.center_y,
                 view.camera.near_plane,
+                view.camera.far_plane,
                 clipping_tolerance,
                 self.distance2filter,
             )
@@ -368,7 +369,7 @@ class Gaussians(torch.nn.Module):
     def mcmc_densification(self, min_opacity: float, cap_max: int) -> None:
         """Relocates low-opacity/degenerate Gaussians and adds new ones up to a cap."""
         # relocate
-        dead_mask = self._opacities.flatten() <= math.log(min_opacity / (1 - min_opacity))
+        dead_mask = self.raw_opacities.flatten() <= math.log(min_opacity / (1 - min_opacity))
         dead_mask |= self._rotations.mul(self._rotations).sum(dim=1) < 1e-8
         n_dead_gaussians = dead_mask.sum().item()
         if n_dead_gaussians > 0:
@@ -384,9 +385,16 @@ class Gaussians(torch.nn.Module):
             counts = counts_per_unique[inverse] + 1  # +1 for the original Gaussian
             adjusted_opacities, adjusted_scales = relocation_adjustment(
                 opacities[sampled_indices],
-                self._scales[sampled_indices].exp(),
+                self.raw_scales[sampled_indices].exp(),
                 counts,
             )
+            if self.use_original_3d_filter:
+                filter_3d = self._filter_3d[sampled_indices]
+                adjusted_scales_square = adjusted_scales.square() - filter_3d
+                adjusted_scales_square = torch.where(adjusted_scales_square > 0, adjusted_scales_square, self._scales[sampled_indices].exp().square())
+                adjusted_opacities = adjusted_opacities / (adjusted_scales_square / (adjusted_scales_square + filter_3d)).prod(dim=1).sqrt()[:, None]
+                adjusted_scales = adjusted_scales_square.sqrt()
+                self._filter_3d[dead_indices] = filter_3d  # required for adding new Gaussians below
             adjusted_opacities = adjusted_opacities.clamp(min_opacity, 1.0 - torch.finfo(torch.float32).eps).logit()
             adjusted_scales = adjusted_scales.log()
 
@@ -405,9 +413,8 @@ class Gaussians(torch.nn.Module):
             # reset optimizer state for the sampled Gaussians
             reset_state(self.optimizer, indices=sampled_indices)
 
-            # if they were set, densification info and 3d filter are now no longer valid
+            # if it was set, densification info is now no longer valid
             self._densification_info = None
-            self._filter_3d = None
 
         # add new Gaussians
         current_n_points = self._means.shape[0]
@@ -423,9 +430,15 @@ class Gaussians(torch.nn.Module):
             counts = counts_per_unique[inverse] + 1  # +1 for the original Gaussian
             adjusted_opacities, adjusted_scales = relocation_adjustment(
                 opacities[sampled_indices],
-                self._scales[sampled_indices].exp(),
+                self.raw_scales[sampled_indices].exp(),
                 counts,
             )
+            if self.use_original_3d_filter:
+                filter_3d = self._filter_3d[sampled_indices]
+                adjusted_scales_square = adjusted_scales.square() - filter_3d
+                adjusted_scales_square = torch.where(adjusted_scales_square > 0, adjusted_scales_square, self._scales[sampled_indices].exp().square())
+                adjusted_opacities = adjusted_opacities / (adjusted_scales_square / (adjusted_scales_square + filter_3d)).prod(dim=1).sqrt()[:, None]
+                adjusted_scales = adjusted_scales_square.sqrt()
             adjusted_opacities = adjusted_opacities.clamp(min_opacity, 1.0 - torch.finfo(torch.float32).eps).logit()
             adjusted_scales = adjusted_scales.log()
 
@@ -472,10 +485,10 @@ class Gaussians(torch.nn.Module):
     @torch.no_grad()
     def post_optimizer_step(self, inject_noise: bool) -> None:
         """Applies modifications to the Gaussians after every optimizer step."""
-        if inject_noise:
-            add_noise(self.raw_scales, self.raw_rotations, self.raw_opacities, self.means, 5e5 * self.lr_means)
         if self.use_optimized_3d_filter:
             self._scales.clamp_min_(self._filter_3d)
+        if inject_noise:
+            add_noise(self.raw_scales, self.raw_rotations, self.raw_opacities, self._means, 5e5 * self.lr_means)
 
     @torch.no_grad()
     def training_cleanup(self, min_opacity: float) -> int:

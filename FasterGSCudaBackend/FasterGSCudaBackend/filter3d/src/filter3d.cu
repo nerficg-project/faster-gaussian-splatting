@@ -17,6 +17,7 @@ namespace faster_gs::filter3d {
         const float top,
         const float bottom,
         const float near_plane,
+        const float far_plane,
         const float distance2filter)
     {
         const int point_idx = blockIdx.x * blockDim.x + threadIdx.x;
@@ -24,7 +25,7 @@ namespace faster_gs::filter3d {
         const float3 position_world = positions[point_idx];
         const float4 w2c_r3 = w2c[2];
         const float z = dot(make_float3(w2c_r3), position_world) + w2c_r3.w;
-        if (z < near_plane) return;
+        if (z < near_plane || z > far_plane) return;
         const float4 w2c_r1 = w2c[0];
         const float x_clip = dot(make_float3(w2c_r1), position_world) + w2c_r1.w;
         if (x_clip < left * z || x_clip > right * z) return;
@@ -49,6 +50,7 @@ namespace faster_gs::filter3d {
         const float center_x,
         const float center_y,
         const float near_plane,
+        const float far_plane,
         const float clipping_tolerance,
         const float distance2filter)
     {
@@ -77,6 +79,7 @@ namespace faster_gs::filter3d {
             top,
             bottom,
             near_plane,
+            far_plane,
             distance2filter
         );
         CHECK_CUDA(config::debug, "update_3d_filter_cu");
