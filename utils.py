@@ -43,7 +43,12 @@ def carve(points: torch.Tensor, dataset: BaseDataset, in_all_frustums: bool, enf
         in_frustum_any |= in_frustum
         if in_all_frustums:
             in_frustum_all &= in_frustum
-        if enforce_alpha and in_frustum.any() and (alpha_gt := view.alpha) is not None:
+        if enforce_alpha and in_frustum.any():
+            alpha_gt = view.alpha
+            if alpha_gt is None:
+                alpha_gt = view.segmentation
+            if alpha_gt is None:
+                continue
             alpha_gt = torch.nn.functional.conv2d(alpha_gt[None], dilation_kernel, padding=1)[0] > 0
             xy_screen = torch.floor(xy_screen[in_frustum]).long()
             valid_alpha = alpha_gt[0, xy_screen[:, 1], xy_screen[:, 0]] > 0
