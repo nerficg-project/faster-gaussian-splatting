@@ -18,5 +18,4 @@ def add_noise(
     means: torch.Tensor,
     current_lr: float,
 ) -> None:
-    random_samples = torch.randn_like(means)  # TODO: could be fused into the CUDA kernel
-    _C.add_noise(raw_scales, raw_rotations, raw_opacities, random_samples, means, current_lr)
+    _C.add_noise(raw_scales, raw_rotations, raw_opacities, means, current_lr)

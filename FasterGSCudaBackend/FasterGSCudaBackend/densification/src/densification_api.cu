@@ -3,6 +3,8 @@
 #include "densification_config.h"
 #include "helper_math.h"
 #include "torch_utils.h"
+#include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <mutex>
 #include <tuple>
 #include <cstdint>
 
@@ -34,7 +36,6 @@ faster_gs::densification::add_noise_wrapper(
     const torch::Tensor& raw_scales,
     const torch::Tensor& raw_rotations,
     const torch::Tensor& raw_opacities,
-    const torch::Tensor& random_samples,
     torch::Tensor& means,
     const float current_lr)
 {
@@ -42,17 +43,22 @@ faster_gs::densification::add_noise_wrapper(
     CHECK_INPUT(config::debug, raw_scales, "raw_scales");
     CHECK_INPUT(config::debug, raw_rotations, "raw_rotations");
     CHECK_INPUT(config::debug, raw_opacities, "raw_opacities");
-    CHECK_INPUT(config::debug, random_samples, "random_samples");
     CHECK_INPUT(config::debug, means, "means");
+
+    // draw philox seed and offset from torch's cuda generator
+    auto* generator = at::check_generator<at::CUDAGeneratorImpl>(at::cuda::detail::getDefaultCUDAGenerator());
+    std::lock_guard<std::mutex> lock(generator->mutex_);
+    const auto [seed, offset] = generator->philox_engine_inputs(4);
 
     add_noise(
         reinterpret_cast<float3*>(raw_scales.data_ptr<float>()),
         reinterpret_cast<float4*>(raw_rotations.data_ptr<float>()),
         raw_opacities.data_ptr<float>(),
-        reinterpret_cast<float3*>(random_samples.data_ptr<float>()),
         reinterpret_cast<float3*>(means.data_ptr<float>()),
         raw_scales.size(0),
-        current_lr
+        current_lr,
+        seed,
+        offset
     );
 
 }

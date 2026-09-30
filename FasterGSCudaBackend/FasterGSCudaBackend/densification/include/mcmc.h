@@ -17,9 +17,10 @@ namespace faster_gs::densification {
         const float3* raw_scales,
         const float4* raw_rotations,
         const float* raw_opacities,
-        const float3* random_samples,
         float3* means,
         const int n_primitives,
-        const float current_lr);
+        const float current_lr,
+        const uint64_t seed,
+        const uint64_t offset);
 
 }

@@ -2,6 +2,7 @@
 
 #include "densification_config.h"
 #include "helper_math.h"
+#include <curand_philox4x32_x.h>
 #include <cstdint>
 
 namespace faster_gs::densification::kernels::mcmc {
@@ -66,14 +67,24 @@ namespace faster_gs::densification::kernels::mcmc {
         float m11, m12, m13, m22, m23, m33;
     };
 
+    // box-muller transform of two uniformly distributed 32-bit integers into two standard normal samples
+    __device__ inline float2 box_muller(const uint bits_u, const uint bits_v) {
+        const float u = fmaf(static_cast<float>(bits_u), 2.3283064e-10f, 1.1641532e-10f); // (0, 1]
+        const float radius = sqrtf(-2.0f * logf(u));
+        float s, c;
+        sincosf(static_cast<float>(bits_v) * 1.4629181e-9f, &s, &c); // [0, 2pi]
+        return make_float2(radius * c, radius * s);
+    }
+
     __global__ void add_noise_cu(
         const float3* __restrict__ raw_scales,
         const float4* __restrict__ raw_rotations,
         const float* __restrict__ raw_opacities,
-        const float3* __restrict__ random_samples,
         float3* __restrict__ means,
         const uint n_primitives,
-        const float current_lr)
+        const float current_lr,
+        const uint64_t seed,
+        const uint64_t offset)
     {
         const uint primitive_idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (primitive_idx >= n_primitives) return;
@@ -108,8 +119,16 @@ namespace faster_gs::densification::kernels::mcmc {
             RSS.m31 * R.m31 + RSS.m32 * R.m32 + RSS.m33 * R.m33,
         };
 
+        // sample noise using one philox evaluation per primitive
+        const uint64_t counter = offset / 4;
+        const uint4 bits = curand_Philox4x32_10(
+            make_uint4(static_cast<uint>(counter), static_cast<uint>(counter >> 32), primitive_idx, 0u),
+            make_uint2(static_cast<uint>(seed), static_cast<uint>(seed >> 32))
+        );
+        const float2 noise_xy = box_muller(bits.x, bits.y);
+        const float3 noise = make_float3(noise_xy.x, noise_xy.y, box_muller(bits.z, bits.w).x);
+
         // transform noise
-        const float3 noise = random_samples[primitive_idx];
         const float3 transformed_noise = make_float3(
             dot(make_float3(cov3d.m11, cov3d.m12, cov3d.m13), noise),
             dot(make_float3(cov3d.m12, cov3d.m22, cov3d.m23), noise),

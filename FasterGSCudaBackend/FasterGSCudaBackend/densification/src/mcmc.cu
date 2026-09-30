@@ -29,19 +29,21 @@ void faster_gs::densification::add_noise(
     const float3* raw_scales,
     const float4* raw_rotations,
     const float* raw_opacities,
-    const float3* random_samples,
     float3* means,
     const int n_primitives,
-    const float current_lr)
+    const float current_lr,
+    const uint64_t seed,
+    const uint64_t offset)
 {
     kernels::mcmc::add_noise_cu<<<div_round_up(n_primitives, config::block_size_add_noise), config::block_size_add_noise>>>(
         raw_scales,
         raw_rotations,
         raw_opacities,
-        random_samples,
         means,
         n_primitives,
-        current_lr
+        current_lr,
+        seed,
+        offset
     );
     CHECK_CUDA(config::debug, "add_noise")
 }

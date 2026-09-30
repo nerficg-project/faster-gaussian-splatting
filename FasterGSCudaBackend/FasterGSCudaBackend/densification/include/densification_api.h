@@ -16,7 +16,6 @@ namespace faster_gs::densification {
         const torch::Tensor& raw_scales,
         const torch::Tensor& raw_rotations,
         const torch::Tensor& raw_opacities,
-        const torch::Tensor& random_samples,
         torch::Tensor& means,
         const float current_lr);
 
