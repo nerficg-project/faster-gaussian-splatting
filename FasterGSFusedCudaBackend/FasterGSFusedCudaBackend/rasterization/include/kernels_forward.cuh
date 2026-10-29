@@ -140,7 +140,7 @@ namespace faster_gs::rasterization::kernels::forward {
         cov2d.x += config::dilation;
         cov2d.z += config::dilation;
         const float determinant = cov2d.x * cov2d.z - cov2d.y * cov2d.y;
-        if (determinant < config::min_cov2d_determinant) active = false; // or (determinant <= 0.0f) with explicit handling in backward
+        if (determinant < config::min_cov2d_determinant) active = false;
         const float3 conic = make_float3(
             cov2d.z / determinant,
             -cov2d.y / determinant,

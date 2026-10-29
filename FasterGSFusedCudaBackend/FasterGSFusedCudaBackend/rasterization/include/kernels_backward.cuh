@@ -206,7 +206,7 @@ namespace faster_gs::rasterization::kernels::backward {
             w2c_r1.z * dL_dmean3d_cam.x + w2c_r2.z * dL_dmean3d_cam.y + w2c_r3.z * dL_dmean3d_cam.z
         );
 
-        // meand3d gradient
+        // mean3d gradient
         const float3 dL_dmean3d = dL_dmean3d_from_splatting + dL_dmean3d_from_color;
         adam_step_helper<3, 0>(dL_dmean3d.x, reinterpret_cast<float*>(means), moments_means, primitive_idx, step_size_means, bias_correction2_sqrt_rcp);
         adam_step_helper<3, 1>(dL_dmean3d.y, reinterpret_cast<float*>(means), moments_means, primitive_idx, step_size_means, bias_correction2_sqrt_rcp);
