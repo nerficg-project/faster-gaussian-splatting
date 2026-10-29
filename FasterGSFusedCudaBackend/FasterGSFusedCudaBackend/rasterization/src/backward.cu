@@ -4,7 +4,6 @@
 #include "rasterization_config.h"
 #include "utils.h"
 #include "helper_math.h"
-#include <stdexcept>
 
 void faster_gs::rasterization::backward(
     const float* grad_image,
@@ -100,7 +99,7 @@ void faster_gs::rasterization::backward(
 
     const float step_size_means = current_mean_lr * bias_correction1_rcp;
 
-    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward>>>(
+    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward, config::block_size_preprocess_backward * total_sh_bases * sizeof(float3)>>>(
         means,
         scales,
         rotations,
@@ -194,25 +193,5 @@ void faster_gs::rasterization::backward(
         bias_correction2_sqrt_rcp
     );
     CHECK_CUDA(config::debug, "adam_step_invisible (sh_coefficients_0)");
-
-    if (active_sh_bases <= 1) return;
-
-    if (total_sh_bases != config::n_sh_bases_rest)
-        throw std::runtime_error(
-            "The number of SH bases does not match \"n_sh_bases_rest\" constant. Please modify \"rasterization_config.h\" and recompile the rasterizer."
-        );
-
-    const float step_size_sh_coefficients_rest = config::lr_sh_coefficients_rest * bias_correction1_rcp;
-    constexpr int elements_per_primitive_sh_coefficients_rest = config::n_sh_bases_rest * 3; // TODO: make this dynamic
-    const int n_elements_sh_coefficients_rest = n_primitives * elements_per_primitive_sh_coefficients_rest;
-    kernels::backward::adam_step_invisible<elements_per_primitive_sh_coefficients_rest><<<div_round_up(n_elements_sh_coefficients_rest, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible>>>(
-        primitive_buffers.n_touched_tiles,
-        reinterpret_cast<float*>(sh_coefficients_rest),
-        moments_sh_coefficients_rest,
-        n_elements_sh_coefficients_rest,
-        step_size_sh_coefficients_rest,
-        bias_correction2_sqrt_rcp
-    );
-    CHECK_CUDA(config::debug, "adam_step_invisible (sh_coefficients_rest)")
 
 }

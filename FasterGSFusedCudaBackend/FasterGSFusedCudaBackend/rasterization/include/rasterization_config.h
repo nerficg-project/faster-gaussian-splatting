@@ -38,7 +38,6 @@ namespace faster_gs::rasterization::config {
     DEF float lr_opacities = 0.025f; // recently updated in official code; used to be 0.05
     DEF float lr_scales = 0.005f;
     DEF float lr_rotations = 0.001f;
-    DEF int n_sh_bases_rest = 15; // change based on used sh degree D: D=0 -> 0, D=1 -> 3, D=2 -> 8, D=3 -> 15
 }
 
 namespace config = faster_gs::rasterization::config;
