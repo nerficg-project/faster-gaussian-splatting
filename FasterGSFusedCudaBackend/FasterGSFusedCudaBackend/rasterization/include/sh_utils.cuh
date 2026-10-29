@@ -99,6 +99,9 @@ namespace faster_gs::rasterization::kernels {
         if (active_sh_bases > 1) {
             auto [x_raw, y_raw, z_raw] = position - cam_position;
             auto [x, y, z] = normalize(make_float3(x_raw, y_raw, z_raw));
+            float3 grad_direction_x = -C1 * coefficients_ptr[2];
+            float3 grad_direction_y = -C1 * coefficients_ptr[0];
+            float3 grad_direction_z = C1 * coefficients_ptr[1];
             const float3 dL_dsh_coefficients_rest_0 = -C1 * y * grad_color;
             adam_step_helper<config::n_sh_bases_rest * 3, 0>(dL_dsh_coefficients_rest_0.x, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
             adam_step_helper<config::n_sh_bases_rest * 3, 1>(dL_dsh_coefficients_rest_0.y, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
@@ -111,12 +114,18 @@ namespace faster_gs::rasterization::kernels {
             adam_step_helper<config::n_sh_bases_rest * 3, 6>(dL_dsh_coefficients_rest_2.x, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
             adam_step_helper<config::n_sh_bases_rest * 3, 7>(dL_dsh_coefficients_rest_2.y, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
             adam_step_helper<config::n_sh_bases_rest * 3, 8>(dL_dsh_coefficients_rest_2.z, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
-            float3 grad_direction_x = -C1 * coefficients_ptr[2];
-            float3 grad_direction_y = -C1 * coefficients_ptr[0];
-            float3 grad_direction_z = C1 * coefficients_ptr[1];
             if (active_sh_bases > 4) {
                 const float xx = x * x, yy = y * y, zz = z * z;
                 const float xy = x * y, xz = x * z, yz = y * z;
+                grad_direction_x = grad_direction_x + C2a * y * coefficients_ptr[3]
+                                                    - C2a * z * coefficients_ptr[6]
+                                                    + C2a * x * coefficients_ptr[7];
+                grad_direction_y = grad_direction_y + C2a * x * coefficients_ptr[3]
+                                                    - C2a * z * coefficients_ptr[4]
+                                                    - C2a * y * coefficients_ptr[7];
+                grad_direction_z = grad_direction_z - C2a * y * coefficients_ptr[4]
+                                                    + C2e * z * coefficients_ptr[5]
+                                                    - C2a * x * coefficients_ptr[6];
                 const float3 dL_dsh_coefficients_rest_3 = C2a * xy * grad_color;
                 adam_step_helper<config::n_sh_bases_rest * 3, 9>(dL_dsh_coefficients_rest_3.x, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
                 adam_step_helper<config::n_sh_bases_rest * 3, 10>(dL_dsh_coefficients_rest_3.y, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
@@ -137,16 +146,22 @@ namespace faster_gs::rasterization::kernels {
                 adam_step_helper<config::n_sh_bases_rest * 3, 21>(dL_dsh_coefficients_rest_7.x, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
                 adam_step_helper<config::n_sh_bases_rest * 3, 22>(dL_dsh_coefficients_rest_7.y, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
                 adam_step_helper<config::n_sh_bases_rest * 3, 23>(dL_dsh_coefficients_rest_7.z, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
-                grad_direction_x = grad_direction_x + C2a * y * coefficients_ptr[3]
-                                                    - C2a * z * coefficients_ptr[6]
-                                                    + C2a * x * coefficients_ptr[7];
-                grad_direction_y = grad_direction_y + C2a * x * coefficients_ptr[3]
-                                                    - C2a * z * coefficients_ptr[4]
-                                                    - C2a * y * coefficients_ptr[7];
-                grad_direction_z = grad_direction_z - C2a * y * coefficients_ptr[4]
-                                                    + C2e * z * coefficients_ptr[5]
-                                                    - C2a * x * coefficients_ptr[6];
                 if (active_sh_bases > 9) {
+                    grad_direction_x = grad_direction_x - C3i * xy * coefficients_ptr[8]
+                                                        + C3c * yz * coefficients_ptr[9]
+                                                        + (C3d - C3e * zz) * coefficients_ptr[12]
+                                                        + C3c * xz * coefficients_ptr[13]
+                                                        + C3b * (yy - xx) * coefficients_ptr[14];
+                    grad_direction_y = grad_direction_y + C3b * (yy - xx) * coefficients_ptr[8]
+                                                        + C3c * xz * coefficients_ptr[9]
+                                                        + (C3d - C3e * zz) * coefficients_ptr[10]
+                                                        - C3c * yz * coefficients_ptr[13]
+                                                        + C3i * xy * coefficients_ptr[14];
+                    grad_direction_z = grad_direction_z + C3c * xy * coefficients_ptr[9]
+                                                        - C3j * yz * coefficients_ptr[10]
+                                                        + (C3k * zz - C3g) * coefficients_ptr[11]
+                                                        - C3j * xz * coefficients_ptr[12]
+                                                        + C3h * (xx - yy) * coefficients_ptr[13];
                     const float3 dL_dsh_coefficients_rest_8 = y * (C3a * yy - C3b * xx) * grad_color;
                     adam_step_helper<config::n_sh_bases_rest * 3, 24>(dL_dsh_coefficients_rest_8.x, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
                     adam_step_helper<config::n_sh_bases_rest * 3, 25>(dL_dsh_coefficients_rest_8.y, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
@@ -175,21 +190,6 @@ namespace faster_gs::rasterization::kernels {
                     adam_step_helper<config::n_sh_bases_rest * 3, 42>(dL_dsh_coefficients_rest_14.x, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
                     adam_step_helper<config::n_sh_bases_rest * 3, 43>(dL_dsh_coefficients_rest_14.y, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
                     adam_step_helper<config::n_sh_bases_rest * 3, 44>(dL_dsh_coefficients_rest_14.z, reinterpret_cast<float*>(sh_coefficients_rest), moments_sh_coefficients_rest, primitive_idx, step_size_sh_coefficients_rest, bias_correction2_sqrt_rcp);
-                    grad_direction_x = grad_direction_x - C3i * xy * coefficients_ptr[8]
-                                                        + C3c * yz * coefficients_ptr[9]
-                                                        + (C3d - C3e * zz) * coefficients_ptr[12]
-                                                        + C3c * xz * coefficients_ptr[13]
-                                                        + C3b * (yy - xx) * coefficients_ptr[14];
-                    grad_direction_y = grad_direction_y + C3b * (yy - xx) * coefficients_ptr[8]
-                                                        + C3c * xz * coefficients_ptr[9]
-                                                        + (C3d - C3e * zz) * coefficients_ptr[10]
-                                                        - C3c * yz * coefficients_ptr[13]
-                                                        + C3i * xy * coefficients_ptr[14];
-                    grad_direction_z = grad_direction_z + C3c * xy * coefficients_ptr[9]
-                                                        - C3j * yz * coefficients_ptr[10]
-                                                        + (C3k * zz - C3g) * coefficients_ptr[11]
-                                                        - C3j * xz * coefficients_ptr[12]
-                                                        + C3h * (xx - yy) * coefficients_ptr[13];
                 }
             }
 
