@@ -12,6 +12,12 @@ namespace faster_gs::rasterization::kernels {
         return 1.0f / (1.0f + expf(-x));
     }
 
+    // folds -0.5 and log2(e) into the conic so that blending evaluates the Gaussian with a single exp2
+    __device__ inline float4 scale_conic_for_exp2(const float4& conic_opacity) {
+        constexpr float log2e = 1.44269504089f;
+        return make_float4(-0.5f * log2e * conic_opacity.x, -log2e * conic_opacity.y, -0.5f * log2e * conic_opacity.z, conic_opacity.w);
+    }
+
     __device__ inline mat3x3 convert_quaternion_to_rotation_matrix(
         const float4& quaternion,
         float& norm_sq)

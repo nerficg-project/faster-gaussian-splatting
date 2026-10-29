@@ -293,6 +293,7 @@ namespace faster_gs::rasterization::kernels::backward {
         uint primitive_idx = 0;
         float2 mean2d = {0.0f, 0.0f};
         float3 conic = {0.0f, 0.0f, 0.0f};
+        float3 conic_exp2 = {0.0f, 0.0f, 0.0f};
         float opacity = 0.0f;
         float3 color = {0.0f, 0.0f, 0.0f};
         float3 color_grad_factor = {0.0f, 0.0f, 0.0f};
@@ -301,6 +302,7 @@ namespace faster_gs::rasterization::kernels::backward {
             mean2d = primitive_mean2d[primitive_idx];
             const float4 conic_opacity = primitive_conic_opacity[primitive_idx];
             conic = make_float3(conic_opacity);
+            conic_exp2 = make_float3(scale_conic_for_exp2(conic_opacity));
             opacity = conic_opacity.w;
             const float3 color_unclamped = primitive_color[primitive_idx];
             color = fmaxf(color_unclamped, 0.0f);
@@ -405,8 +407,8 @@ namespace faster_gs::rasterization::kernels::backward {
 
             const float2 pixel = make_float2(__uint2float_rn(pixel_coords.x), __uint2float_rn(pixel_coords.y)) + 0.5f;
             const float2 delta = mean2d - pixel;
-            const float exponent = -0.5f * (conic.x * delta.x * delta.x + conic.z * delta.y * delta.y) - conic.y * delta.x * delta.y;
-            const float gaussian = expf(fminf(exponent, 0.0f));
+            const float exponent = delta.x * (conic_exp2.x * delta.x + conic_exp2.y * delta.y) + conic_exp2.z * delta.y * delta.y;
+            const float gaussian = exp2f(fminf(exponent, 0.0f));
             const float alpha = opacity * gaussian;
             if (alpha < config::min_alpha_threshold) continue;
 
