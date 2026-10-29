@@ -216,13 +216,14 @@ namespace faster_gs::rasterization::kernels::forward {
     }
 
     // based on https://github.com/r4dl/StopThePop-Rasterization/blob/d8cad09919ff49b11be3d693d1e71fa792f559bb/cuda_rasterizer/stopthepop/stopthepop_common.cuh#L325
+    template <typename KeyT>
     __global__ void create_instances_cu(
         const uint* __restrict__ primitive_indices_sorted,
         const uint* __restrict__ primitive_offsets,
         const ushort4* __restrict__ primitive_screen_bounds,
         const float2* __restrict__ primitive_mean2d,
         const float4* __restrict__ primitive_conic_opacity,
-        ushort* __restrict__ instance_keys,
+        KeyT* __restrict__ instance_keys,
         uint* __restrict__ instance_primitive_indices,
         const uint grid_width,
         const uint n_visible_primitives)
@@ -265,7 +266,7 @@ namespace faster_gs::rasterization::kernels::forward {
             const uint tile_y = screen_bounds.z + (instance_idx / screen_bounds_width);
             if (will_primitive_contribute(mean2d_shifted, conic, tile_x, tile_y, power_threshold)) {
                 const uint tile_idx = tile_y * grid_width + tile_x;
-                const ushort instance_key = static_cast<ushort>(tile_idx);
+                const KeyT instance_key = static_cast<KeyT>(tile_idx);
                 instance_keys[current_write_offset] = instance_key;
                 instance_primitive_indices[current_write_offset] = primitive_idx;
                 current_write_offset++;
@@ -310,7 +311,7 @@ namespace faster_gs::rasterization::kernels::forward {
                 if (write) {
                     const uint write_offset = current_write_offset_coop + __popc(write_ballot & previous_lanes_mask);
                     const uint tile_idx = tile_y * grid_width + tile_x;
-                    const ushort instance_key = static_cast<ushort>(tile_idx);
+                    const KeyT instance_key = static_cast<KeyT>(tile_idx);
                     instance_keys[write_offset] = instance_key;
                     instance_primitive_indices[write_offset] = primitive_idx_coop;
                 }
@@ -321,17 +322,18 @@ namespace faster_gs::rasterization::kernels::forward {
         }
     }
 
+    template <typename KeyT>
     __global__ void extract_instance_ranges_cu(
-        const ushort* __restrict__ instance_keys,
+        const KeyT* __restrict__ instance_keys,
         uint2* __restrict__ tile_instance_ranges,
         const uint n_instances)
     {
         const uint instance_idx = blockIdx.x * blockDim.x + threadIdx.x;
         if (instance_idx >= n_instances) return;
-        const ushort instance_tile_idx = instance_keys[instance_idx];
+        const KeyT instance_tile_idx = instance_keys[instance_idx];
         if (instance_idx == 0) tile_instance_ranges[instance_tile_idx].x = 0;
         else {
-            const ushort previous_instance_tile_idx = instance_keys[instance_idx - 1];
+            const KeyT previous_instance_tile_idx = instance_keys[instance_idx - 1];
             if (instance_tile_idx != previous_instance_tile_idx) {
                 tile_instance_ranges[previous_instance_tile_idx].y = instance_idx;
                 tile_instance_ranges[instance_tile_idx].x = instance_idx;

@@ -93,19 +93,20 @@ namespace faster_gs::rasterization {
         }
     };
 
+    template <typename KeyT>
     struct InstanceBuffers {
         size_t cub_workspace_size;
         char* cub_workspace;
-        cub::DoubleBuffer<ushort> keys;
+        cub::DoubleBuffer<KeyT> keys;
         cub::DoubleBuffer<uint> primitive_indices;
 
         static InstanceBuffers from_blob(char*& blob, int n_instances, int end_bit) {
             InstanceBuffers buffers;
-            ushort* keys_current;
+            KeyT* keys_current;
             obtain(blob, keys_current, n_instances);
-            ushort* keys_alternate;
+            KeyT* keys_alternate;
             obtain(blob, keys_alternate, n_instances);
-            buffers.keys = cub::DoubleBuffer<ushort>(keys_current, keys_alternate);
+            buffers.keys = cub::DoubleBuffer<KeyT>(keys_current, keys_alternate);
             uint* primitive_indices_current;
             obtain(blob, primitive_indices_current, n_instances);
             uint* primitive_indices_alternate;

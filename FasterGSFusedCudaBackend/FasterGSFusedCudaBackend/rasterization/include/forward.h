@@ -1,5 +1,6 @@
 #pragma once
 
+#include "buffer_utils.h"
 #include "helper_math.h"
 #include <functional>
 #include <tuple>
@@ -32,5 +33,25 @@ namespace faster_gs::rasterization {
         const float center_y,
         const float near_plane,
         const float far_plane);
+
+    template <typename KeyT>
+    void diff_rasterize(
+        std::function<char* (size_t)>& resize_instance_buffers,
+        std::function<char* (size_t)>& resize_bucket_buffers,
+        PrimitiveBuffers& primitive_buffers,
+        TileBuffers& tile_buffers,
+        const dim3& grid,
+        const dim3& block,
+        const float3* bg_color,
+        float* image,
+        const cudaStream_t memset_stream,
+        const int n_visible_primitives,
+        const int n_instances,
+        const int n_tiles,
+        const int end_bit,
+        const int width,
+        const int height,
+        int& n_buckets,
+        int& instance_primitive_indices_selector);
 
 }
