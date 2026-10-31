@@ -142,6 +142,7 @@ We thank the authors of the following works, whose ideas and open-source impleme
 - Yang et al. [_Warp-Level Culling for Efficient Blending in 3D Gaussian Splatting._](https://plse-splats.github.io/faster-gaussian-splatting/) HPG 2026.
 - Ye et al. [_AbsGS: Recovering Fine Details for 3D Gaussian Splatting._](https://ty424.github.io/AbsGS.github.io/) ACM MM 2024.
 - Yu et al. [_Gaussian Opacity Fields: Efficient Adaptive Surface Reconstruction in Unbounded Scenes._](https://niujinshuchong.github.io/gaussian-opacity-fields/) SIGGRAPH Asia 2024.
+- Kopanas [_What the 3DGS Literature Left on the Table._](https://grgkopanas.github.io/3dgs_cuda_blog/) Blog post 2026.
 
 We also thank [Janusch Patas (aka. MrNeRF)](https://github.com/MrNeRF) for partially inspiring this project with his open-source bounty for [LichtFeld Studio](https://lichtfeld.io/), where an early version of our work was the [winning submission](https://github.com/MrNeRF/LichtFeld-Studio/pull/245) and has since become one of its core components.
 
