@@ -33,6 +33,7 @@ The `main` branch provides our fast 3DGS implementation with many additional fea
 - Even faster training through informed pruning from [Speedy-Splat](https://speedysplat.github.io/)
 - Handling of photometric variations in input images through [PPISP](https://research.nvidia.com/labs/sil/projects/ppisp/)
 - Warp-level culling for efficient blending from [Warp-Level Culling](https://plse-splats.github.io/faster-gaussian-splatting/)
+- Absolute gradient densification from [AbsGS](https://ty424.github.io/AbsGS.github.io/) using the selection strategy of [Gaussian Opacity Fields](https://niujinshuchong.github.io/gaussian-opacity-fields/)
 
 On the `FasterGSFused` branch, we went full nerd-mode and fused the backward pass and optimizer. It provides an additional speedup over our default implementation and also uses less VRAM. And the best part is that the code is still pretty clean. Great if you need every bit of performance or just like to train extra fast.
 
@@ -139,6 +140,9 @@ We thank the authors of the following works, whose ideas and open-source impleme
 - Hanson et al. [_Speedy-Splat: Fast 3D Gaussian Splatting with Sparse Pixels and Sparse Primitives._](https://speedysplat.github.io/) CVPR 2025.
 - Deutsch et al. [_PPISP: Physically-Plausible Compensation and Control of Photometric Variations in Radiance Field Reconstruction._](https://research.nvidia.com/labs/sil/projects/ppisp/) CVPR 2026.
 - Yang et al. [_Warp-Level Culling for Efficient Blending in 3D Gaussian Splatting._](https://plse-splats.github.io/faster-gaussian-splatting/) HPG 2026.
+- Ye et al. [_AbsGS: Recovering Fine Details for 3D Gaussian Splatting._](https://ty424.github.io/AbsGS.github.io/) ACM MM 2024.
+- Yu et al. [_Gaussian Opacity Fields: Efficient Adaptive Surface Reconstruction in Unbounded Scenes._](https://niujinshuchong.github.io/gaussian-opacity-fields/) SIGGRAPH Asia 2024.
+- Kopanas [_What the 3DGS Literature Left on the Table._](https://grgkopanas.github.io/3dgs_cuda_blog/) Blog post 2026.
 
 We also thank [Janusch Patas (aka. MrNeRF)](https://github.com/MrNeRF) for partially inspiring this project with his open-source bounty for [LichtFeld Studio](https://lichtfeld.io/), where an early version of our work was the [winning submission](https://github.com/MrNeRF/LichtFeld-Studio/pull/245) and has since become one of its core components.
 
