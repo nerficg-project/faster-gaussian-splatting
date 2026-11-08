@@ -2,6 +2,8 @@
 #include "filter3d_config.h"
 #include "helper_math.h"
 #include "utils.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 
 
 namespace faster_gs::filter3d {
@@ -54,6 +56,8 @@ namespace faster_gs::filter3d {
         const float clipping_tolerance,
         const float distance2filter)
     {
+        const at::cuda::CUDAGuard device_guard(positions.device());
+
         const int n_points = positions.size(0);
 
         const float bounds_factor = clipping_tolerance + 0.5f;
@@ -68,7 +72,7 @@ namespace faster_gs::filter3d {
         const float top = (-max_y_shifted - principal_offset_y) / focal_y;
         const float bottom = (max_y_shifted - principal_offset_y) / focal_y;
 
-        update_3d_filter_cu<<<div_round_up(n_points, config::block_size_update_3d_filter), config::block_size_update_3d_filter>>>(
+        update_3d_filter_cu<<<div_round_up(n_points, config::block_size_update_3d_filter), config::block_size_update_3d_filter, 0, at::cuda::getCurrentCUDAStream()>>>(
             reinterpret_cast<const float3*>(positions.data_ptr<float>()),
             reinterpret_cast<const float4*>(w2c.data_ptr<float>()),
             filter_3d.data_ptr<float>(),

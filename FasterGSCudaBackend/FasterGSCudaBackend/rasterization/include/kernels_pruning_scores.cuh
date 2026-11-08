@@ -27,8 +27,7 @@ namespace faster_gs::rasterization::kernels::pruning_scores {
         float2* __restrict__ primitive_mean2d,
         float4* __restrict__ primitive_conic_opacity,
         float3* __restrict__ primitive_color,
-        uint* __restrict__ n_visible_primitives,
-        uint* __restrict__ n_instances,
+        uint2* __restrict__ counters,
         const uint n_primitives,
         const uint grid_width,
         const uint grid_height,
@@ -199,11 +198,11 @@ namespace faster_gs::rasterization::kernels::pruning_scores {
         );
         primitive_color[primitive_idx] = fmaxf(color, 0.0f);
 
-        const uint offset = atomicAdd(n_visible_primitives, 1);
+        const uint offset = atomicAdd(&counters[0].x, 1);
         const uint depth_key = __float_as_uint(depth);
         primitive_depth_keys[offset] = depth_key;
         primitive_indices[offset] = primitive_idx;
-        atomicAdd(n_instances, n_touched_tiles);
+        atomicAdd(&counters[0].y, n_touched_tiles);
     }
 
     __global__ void apply_depth_ordering_cu(

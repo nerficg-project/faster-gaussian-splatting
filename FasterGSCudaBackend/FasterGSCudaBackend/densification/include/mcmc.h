@@ -11,7 +11,8 @@ namespace faster_gs::densification {
         const int64_t* n_samples_per_primitive,
         float* new_opacities,
         float3* new_scales,
-        const int n_primitives);
+        const int n_primitives,
+        const cudaStream_t stream);
 
     void add_noise(
         const float3* raw_scales,
@@ -21,6 +22,7 @@ namespace faster_gs::densification {
         const int n_primitives,
         const float current_lr,
         const uint64_t seed,
-        const uint64_t offset);
+        const uint64_t offset,
+        const cudaStream_t stream);
 
 }

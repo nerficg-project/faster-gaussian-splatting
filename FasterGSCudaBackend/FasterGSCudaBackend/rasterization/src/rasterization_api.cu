@@ -6,6 +6,8 @@
 #include "torch_utils.h"
 #include "rasterization_config.h"
 #include "helper_math.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <stdexcept>
 #include <functional>
 #include <tuple>
@@ -32,6 +34,8 @@ faster_gs::rasterization::forward_wrapper(
     const float far_plane,
     const bool proper_antialiasing)
 {
+    const at::cuda::CUDAGuard device_guard(means.device());
+
     // all optimizable tensors must be passed as contiguous CUDA float tensors
     CHECK_INPUT(config::debug, means, "means");
     CHECK_INPUT(config::debug, scales, "scales");
@@ -80,7 +84,8 @@ faster_gs::rasterization::forward_wrapper(
         center_y,
         near_plane,
         far_plane,
-        proper_antialiasing
+        proper_antialiasing,
+        at::cuda::getCurrentCUDAStream()
     );
 
     return {
@@ -121,6 +126,8 @@ faster_gs::rasterization::backward_wrapper(
     const int n_buckets,
     const int instance_primitive_indices_selector)
 {
+    const at::cuda::CUDAGuard device_guard(means.device());
+
     const int n_primitives = means.size(0);
     const int total_sh_bases = sh_coefficients_rest.size(1);
     const torch::TensorOptions float_options = torch::TensorOptions().dtype(torch::kFloat).device(torch::kCUDA);
@@ -175,7 +182,8 @@ faster_gs::rasterization::backward_wrapper(
         focal_y,
         center_x,
         center_y,
-        proper_antialiasing
+        proper_antialiasing,
+        at::cuda::getCurrentCUDAStream()
     );
 
     return {grad_means, grad_scales, grad_rotations, grad_opacities, grad_sh_coefficients_0, grad_sh_coefficients_rest};
@@ -205,6 +213,8 @@ faster_gs::rasterization::inference_wrapper(
     const bool to_chw,
     const bool clamp_output)
 {
+    const at::cuda::CUDAGuard device_guard(means.device());
+
     const int n_primitives = means.size(0);
     const int total_sh_bases = sh_coefficients_rest.size(1);
     const torch::TensorOptions float_options = torch::TensorOptions().dtype(torch::kFloat).device(torch::kCUDA);
@@ -244,7 +254,8 @@ faster_gs::rasterization::inference_wrapper(
         far_plane,
         proper_antialiasing,
         to_chw,
-        clamp_output
+        clamp_output,
+        at::cuda::getCurrentCUDAStream()
     );
 
     return image;
@@ -273,6 +284,8 @@ faster_gs::rasterization::pruning_scores_wrapper(
     const float far_plane,
     const bool proper_antialiasing)
 {
+    const at::cuda::CUDAGuard device_guard(means.device());
+
     const int n_primitives = means.size(0);
     const int total_sh_bases = sh_coefficients_rest.size(1);
     const torch::TensorOptions byte_options = torch::TensorOptions().dtype(torch::kByte).device(torch::kCUDA);
@@ -308,6 +321,7 @@ faster_gs::rasterization::pruning_scores_wrapper(
         center_y,
         near_plane,
         far_plane,
-        proper_antialiasing
+        proper_antialiasing,
+        at::cuda::getCurrentCUDAStream()
     );
 }

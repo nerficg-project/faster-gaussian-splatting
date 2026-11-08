@@ -3,7 +3,9 @@
 #include "densification_config.h"
 #include "helper_math.h"
 #include "torch_utils.h"
+#include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <mutex>
 #include <tuple>
 #include <cstdint>
@@ -14,6 +16,8 @@ faster_gs::densification::relocation_wrapper(
     const torch::Tensor& old_scales,
     const torch::Tensor& n_samples_per_primitive)
 {
+    const at::cuda::CUDAGuard device_guard(old_opacities.device());
+
     const int n_primitives = old_opacities.size(0);
     const torch::TensorOptions float_options = torch::TensorOptions().dtype(torch::kFloat).device(torch::kCUDA);
     torch::Tensor new_opacities = torch::empty({n_primitives, 1}, float_options);
@@ -25,7 +29,8 @@ faster_gs::densification::relocation_wrapper(
         n_samples_per_primitive.contiguous().data_ptr<int64_t>(),
         new_opacities.data_ptr<float>(),
         reinterpret_cast<float3*>(new_scales.data_ptr<float>()),
-        n_primitives
+        n_primitives,
+        at::cuda::getCurrentCUDAStream()
     );
 
     return std::make_tuple(new_opacities, new_scales);
@@ -39,6 +44,8 @@ faster_gs::densification::add_noise_wrapper(
     torch::Tensor& means,
     const float current_lr)
 {
+    const at::cuda::CUDAGuard device_guard(means.device());
+
     // tensors must be contiguous CUDA float tensors
     CHECK_INPUT(config::debug, raw_scales, "raw_scales");
     CHECK_INPUT(config::debug, raw_rotations, "raw_rotations");
@@ -58,7 +65,8 @@ faster_gs::densification::add_noise_wrapper(
         raw_scales.size(0),
         current_lr,
         seed,
-        offset
+        offset,
+        at::cuda::getCurrentCUDAStream()
     );
 
 }

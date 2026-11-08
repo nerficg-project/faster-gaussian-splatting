@@ -323,6 +323,7 @@ namespace faster_gs::rasterization::kernels::backward {
         const uint width,
         const uint height,
         const uint grid_width,
+        const uint n_tiles,
         const bool proper_antialiasing)
     {
         auto block = cg::this_thread_block();
@@ -330,6 +331,8 @@ namespace faster_gs::rasterization::kernels::backward {
         const uint bucket_idx = block.group_index().x;
         const uint lane_idx = warp.thread_rank();
 
+        // launched with an upper bound of the bucket count
+        if (bucket_idx >= tile_bucket_offsets[n_tiles - 1]) return;
         const uint tile_idx = bucket_tile_index[bucket_idx];
         const uint2 tile_instance_range = tile_instance_ranges[tile_idx];
         const int tile_n_primitives = tile_instance_range.y - tile_instance_range.x;

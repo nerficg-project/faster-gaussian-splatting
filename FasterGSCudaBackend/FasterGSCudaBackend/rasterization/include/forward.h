@@ -33,7 +33,8 @@ namespace faster_gs::rasterization {
         const float center_y,
         const float near_plane,
         const float far_plane,
-        const bool proper_antialiasing);
+        const bool proper_antialiasing,
+        const cudaStream_t stream);
 
     template <typename KeyT>
     void diff_rasterize(
@@ -45,7 +46,7 @@ namespace faster_gs::rasterization {
         const dim3& block,
         const float3* bg_color,
         float* image,
-        const cudaStream_t memset_stream,
+        const cudaStream_t stream,
         const int n_visible_primitives,
         const int n_instances,
         const int n_tiles,

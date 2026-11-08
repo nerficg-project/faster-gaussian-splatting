@@ -11,10 +11,11 @@ void faster_gs::densification::relocation_adjustment(
     const int64_t* n_samples_per_primitive,
     float* new_opacities,
     float3* new_scales,
-    const int n_primitives)
+    const int n_primitives,
+    const cudaStream_t stream)
 {
     kernels::mcmc::init_relocation_coefficients();
-    kernels::mcmc::relocation_cu<<<div_round_up(n_primitives, config::block_size_relocation), config::block_size_relocation>>>(
+    kernels::mcmc::relocation_cu<<<div_round_up(n_primitives, config::block_size_relocation), config::block_size_relocation, 0, stream>>>(
         old_opacities,
         old_scales,
         n_samples_per_primitive,
@@ -33,9 +34,10 @@ void faster_gs::densification::add_noise(
     const int n_primitives,
     const float current_lr,
     const uint64_t seed,
-    const uint64_t offset)
+    const uint64_t offset,
+    const cudaStream_t stream)
 {
-    kernels::mcmc::add_noise_cu<<<div_round_up(n_primitives, config::block_size_add_noise), config::block_size_add_noise>>>(
+    kernels::mcmc::add_noise_cu<<<div_round_up(n_primitives, config::block_size_add_noise), config::block_size_add_noise, 0, stream>>>(
         raw_scales,
         raw_rotations,
         raw_opacities,

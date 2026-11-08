@@ -42,6 +42,7 @@ namespace faster_gs::rasterization {
         const float focal_y,
         const float center_x,
         const float center_y,
-        const bool proper_antialiasing);
+        const bool proper_antialiasing,
+        const cudaStream_t stream);
 
 }
