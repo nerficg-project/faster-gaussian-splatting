@@ -33,7 +33,8 @@ std::tuple<int, int, int> faster_gs::rasterization::forward(
     const float center_x,
     const float center_y,
     const float near_plane,
-    const float far_plane)
+    const float far_plane,
+    const cudaStream_t stream)
 {
     const dim3 grid(div_round_up(width, config::tile_width), div_round_up(height, config::tile_height), 1);
     const dim3 block(config::tile_width, config::tile_height, 1);
@@ -43,24 +44,14 @@ std::tuple<int, int, int> faster_gs::rasterization::forward(
     char* tile_buffers_blob = resize_tile_buffers(required<TileBuffers>(n_tiles));
     TileBuffers tile_buffers = TileBuffers::from_blob(tile_buffers_blob, n_tiles);
 
-    static cudaStream_t memset_stream = 0;
-    if constexpr (!config::debug) {
-        static bool memset_stream_initialized = false;
-        if (!memset_stream_initialized) {
-            cudaStreamCreate(&memset_stream);
-            memset_stream_initialized = true;
-        }
-        cudaMemsetAsync(tile_buffers.instance_ranges, 0, sizeof(uint2) * n_tiles, memset_stream);
-    }
-    else cudaMemset(tile_buffers.instance_ranges, 0, sizeof(uint2) * n_tiles);
+    cudaMemsetAsync(tile_buffers.instance_ranges, 0, sizeof(uint2) * n_tiles, stream);
 
     char* primitive_buffers_blob = resize_primitive_buffers(required<PrimitiveBuffers>(n_primitives));
     PrimitiveBuffers primitive_buffers = PrimitiveBuffers::from_blob(primitive_buffers_blob, n_primitives);
 
-    cudaMemset(primitive_buffers.n_visible_primitives, 0, sizeof(uint));
-    cudaMemset(primitive_buffers.n_instances, 0, sizeof(uint));
+    cudaMemsetAsync(primitive_buffers.counters, 0, sizeof(uint2), stream);
 
-    kernels::forward::preprocess_cu<<<div_round_up(n_primitives, config::block_size_preprocess), config::block_size_preprocess>>>(
+    kernels::forward::preprocess_cu<<<div_round_up(n_primitives, config::block_size_preprocess), config::block_size_preprocess, 0, stream>>>(
         means,
         scales,
         rotations,
@@ -76,8 +67,7 @@ std::tuple<int, int, int> faster_gs::rasterization::forward(
         primitive_buffers.mean2d,
         primitive_buffers.conic_opacity,
         primitive_buffers.color,
-        primitive_buffers.n_visible_primitives,
-        primitive_buffers.n_instances,
+        primitive_buffers.counters,
         n_primitives,
         grid.x,
         grid.y,
@@ -94,21 +84,24 @@ std::tuple<int, int, int> faster_gs::rasterization::forward(
     );
     CHECK_CUDA(config::debug, "preprocess")
 
-    int n_visible_primitives;
-    cudaMemcpy(&n_visible_primitives, primitive_buffers.n_visible_primitives, sizeof(uint), cudaMemcpyDeviceToHost);
-    int n_instances;
-    cudaMemcpy(&n_instances, primitive_buffers.n_instances, sizeof(uint), cudaMemcpyDeviceToHost);
+    uint2 counters;
+    cudaMemcpyAsync(&counters, primitive_buffers.counters, sizeof(uint2), cudaMemcpyDeviceToHost, stream);
+    cudaStreamSynchronize(stream);
+    const int n_visible_primitives = counters.x;
+    const int n_instances = counters.y;
 
     cub::DeviceRadixSort::SortPairs(
         primitive_buffers.cub_workspace,
         primitive_buffers.cub_workspace_size,
         primitive_buffers.depth_keys,
         primitive_buffers.primitive_indices,
-        n_visible_primitives
+        n_visible_primitives,
+        0, sizeof(uint) * 8,
+        stream
     );
     CHECK_CUDA(config::debug, "cub::DeviceRadixSort::SortPairs (depth)")
 
-    kernels::forward::apply_depth_ordering_cu<<<div_round_up(n_visible_primitives, config::block_size_apply_depth_ordering), config::block_size_apply_depth_ordering>>>(
+    kernels::forward::apply_depth_ordering_cu<<<div_round_up(n_visible_primitives, config::block_size_apply_depth_ordering), config::block_size_apply_depth_ordering, 0, stream>>>(
         primitive_buffers.primitive_indices.Current(),
         primitive_buffers.n_touched_tiles,
         primitive_buffers.offset,
@@ -121,7 +114,8 @@ std::tuple<int, int, int> faster_gs::rasterization::forward(
         primitive_buffers.cub_workspace_size,
         primitive_buffers.offset,
         primitive_buffers.offset,
-        n_visible_primitives
+        n_visible_primitives,
+        stream
     );
     CHECK_CUDA(config::debug, "cub::DeviceScan::ExclusiveSum (primitive_buffers.offset)")
 
@@ -138,7 +132,7 @@ std::tuple<int, int, int> faster_gs::rasterization::forward(
         block, \
         bg_color, \
         image, \
-        memset_stream, \
+        stream, \
         n_visible_primitives, \
         n_instances, \
         n_tiles, \
@@ -164,7 +158,7 @@ void faster_gs::rasterization::diff_rasterize(
     const dim3& block,
     const float3* bg_color,
     float* image,
-    const cudaStream_t memset_stream,
+    const cudaStream_t stream,
     const int n_visible_primitives,
     const int n_instances,
     const int n_tiles,
@@ -177,7 +171,7 @@ void faster_gs::rasterization::diff_rasterize(
     char* instance_buffers_blob = resize_instance_buffers(required<InstanceBuffers<KeyT>>(n_instances, end_bit));
     InstanceBuffers<KeyT> instance_buffers = InstanceBuffers<KeyT>::from_blob(instance_buffers_blob, n_instances, end_bit);
 
-    kernels::forward::create_instances_cu<KeyT><<<div_round_up(n_visible_primitives, config::block_size_create_instances), config::block_size_create_instances>>>(
+    kernels::forward::create_instances_cu<KeyT><<<div_round_up(n_visible_primitives, config::block_size_create_instances), config::block_size_create_instances, 0, stream>>>(
         primitive_buffers.primitive_indices.Current(),
         primitive_buffers.offset,
         primitive_buffers.screen_bounds,
@@ -196,16 +190,15 @@ void faster_gs::rasterization::diff_rasterize(
         instance_buffers.keys,
         instance_buffers.primitive_indices,
         n_instances,
-        0, end_bit
+        0, end_bit,
+        stream
     );
     CHECK_CUDA(config::debug, "cub::DeviceRadixSort::SortPairs (tile)")
 
     instance_primitive_indices_selector = instance_buffers.primitive_indices.selector;
 
-    if constexpr (!config::debug) cudaStreamSynchronize(memset_stream);
-
     if (n_instances > 0) {
-        kernels::forward::extract_instance_ranges_cu<KeyT><<<div_round_up(n_instances, config::block_size_extract_instance_ranges), config::block_size_extract_instance_ranges>>>(
+        kernels::forward::extract_instance_ranges_cu<KeyT><<<div_round_up(n_instances, config::block_size_extract_instance_ranges), config::block_size_extract_instance_ranges, 0, stream>>>(
             instance_buffers.keys.Current(),
             tile_buffers.instance_ranges,
             n_instances
@@ -213,7 +206,7 @@ void faster_gs::rasterization::diff_rasterize(
         CHECK_CUDA(config::debug, "extract_instance_ranges")
     }
 
-    kernels::forward::extract_bucket_counts<<<div_round_up(n_tiles, config::block_size_extract_bucket_counts), config::block_size_extract_bucket_counts>>>(
+    kernels::forward::extract_bucket_counts<<<div_round_up(n_tiles, config::block_size_extract_bucket_counts), config::block_size_extract_bucket_counts, 0, stream>>>(
         tile_buffers.instance_ranges,
         tile_buffers.n_buckets,
         n_tiles
@@ -225,16 +218,17 @@ void faster_gs::rasterization::diff_rasterize(
         tile_buffers.cub_workspace_size,
         tile_buffers.n_buckets,
         tile_buffers.buckets_offset,
-        n_tiles
+        n_tiles,
+        stream
     );
     CHECK_CUDA(config::debug, "cub::DeviceScan::InclusiveSum (tile_buffers.n_buckets)")
 
-    cudaMemcpy(&n_buckets, tile_buffers.buckets_offset + n_tiles - 1, sizeof(uint), cudaMemcpyDeviceToHost);
+    n_buckets = n_instances / 32 + n_tiles;
 
     char* bucket_buffers_blob = resize_bucket_buffers(required<BucketBuffers>(n_buckets));
     BucketBuffers bucket_buffers = BucketBuffers::from_blob(bucket_buffers_blob, n_buckets);
 
-    kernels::forward::blend_cu<<<grid, block>>>(
+    kernels::forward::blend_cu<<<grid, block, 0, stream>>>(
         tile_buffers.instance_ranges,
         tile_buffers.buckets_offset,
         instance_buffers.primitive_indices.Current(),

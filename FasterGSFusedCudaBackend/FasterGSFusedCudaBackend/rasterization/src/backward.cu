@@ -45,7 +45,8 @@ void faster_gs::rasterization::backward(
     const float center_x,
     const float center_y,
     const float current_mean_lr,
-    const int adam_step_count)
+    const int adam_step_count,
+    const cudaStream_t stream)
 {
     const dim3 grid(div_round_up(width, config::tile_width), div_round_up(height, config::tile_height), 1);
     const int n_tiles = grid.x * grid.y;
@@ -57,7 +58,7 @@ void faster_gs::rasterization::backward(
 
     // note that with c++20 one could use a templated lambda to improve readability here
     auto dispatch_rasterize_backward = [&](const uint* instance_primitive_indices) {
-        kernels::backward::blend_backward_cu<<<n_buckets, 32>>>(
+        kernels::backward::blend_backward_cu<<<n_buckets, 32, 0, stream>>>(
             tile_buffers.instance_ranges,
             tile_buffers.buckets_offset,
             instance_primitive_indices,
@@ -79,7 +80,8 @@ void faster_gs::rasterization::backward(
             n_primitives,
             width,
             height,
-            grid.x
+            grid.x,
+            n_tiles
         );
         CHECK_CUDA(config::debug, "blend_backward")
     };
@@ -99,7 +101,7 @@ void faster_gs::rasterization::backward(
 
     const float step_size_means = current_mean_lr * bias_correction1_rcp;
 
-    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward, config::block_size_preprocess_backward * total_sh_bases * sizeof(float3)>>>(
+    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward, config::block_size_preprocess_backward * total_sh_bases * sizeof(float3), stream>>>(
         means,
         scales,
         rotations,
@@ -136,7 +138,7 @@ void faster_gs::rasterization::backward(
     CHECK_CUDA(config::debug, "preprocess_backward")
 
     const int n_elements_means = n_primitives * 3;
-    kernels::backward::adam_step_invisible<3><<<div_round_up(n_elements_means, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible>>>(
+    kernels::backward::adam_step_invisible<3><<<div_round_up(n_elements_means, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible, 0, stream>>>(
         primitive_buffers.n_touched_tiles,
         reinterpret_cast<float*>(means),
         moments_means,
@@ -148,7 +150,7 @@ void faster_gs::rasterization::backward(
 
     const float step_size_scales = config::lr_scales * bias_correction1_rcp;
     const int n_elements_scales = n_primitives * 3;
-    kernels::backward::adam_step_invisible<3><<<div_round_up(n_elements_scales, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible>>>(
+    kernels::backward::adam_step_invisible<3><<<div_round_up(n_elements_scales, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible, 0, stream>>>(
         primitive_buffers.n_touched_tiles,
         reinterpret_cast<float*>(scales),
         moments_scales,
@@ -160,7 +162,7 @@ void faster_gs::rasterization::backward(
 
     const float step_size_rotations = config::lr_rotations * bias_correction1_rcp;
     const int n_elements_rotations = n_primitives * 4;
-    kernels::backward::adam_step_invisible<4><<<div_round_up(n_elements_rotations, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible>>>(
+    kernels::backward::adam_step_invisible<4><<<div_round_up(n_elements_rotations, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible, 0, stream>>>(
         primitive_buffers.n_touched_tiles,
         reinterpret_cast<float*>(rotations),
         moments_rotations,
@@ -172,7 +174,7 @@ void faster_gs::rasterization::backward(
 
     const float step_size_opacities = config::lr_opacities * bias_correction1_rcp;
     const int n_elements_opacities = n_primitives;
-    kernels::backward::adam_step_invisible<1><<<div_round_up(n_elements_opacities, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible>>>(
+    kernels::backward::adam_step_invisible<1><<<div_round_up(n_elements_opacities, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible, 0, stream>>>(
         primitive_buffers.n_touched_tiles,
         opacities,
         moments_opacities,
@@ -184,7 +186,7 @@ void faster_gs::rasterization::backward(
 
     const float step_size_sh_coefficients_0 = config::lr_sh_coefficients_0 * bias_correction1_rcp;
     const int n_elements_sh_coefficients_0 = n_primitives * 3;
-    kernels::backward::adam_step_invisible<3><<<div_round_up(n_elements_sh_coefficients_0, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible>>>(
+    kernels::backward::adam_step_invisible<3><<<div_round_up(n_elements_sh_coefficients_0, config::block_size_adam_step_invisible), config::block_size_adam_step_invisible, 0, stream>>>(
         primitive_buffers.n_touched_tiles,
         reinterpret_cast<float*>(sh_coefficients_0),
         moments_sh_coefficients_0,

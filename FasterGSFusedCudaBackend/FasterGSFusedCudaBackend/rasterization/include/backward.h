@@ -45,6 +45,7 @@ namespace faster_gs::rasterization {
         const float center_x,
         const float center_y,
         const float current_mean_lr,
-        const int adam_step_count);
+        const int adam_step_count,
+        const cudaStream_t stream);
 
 }
