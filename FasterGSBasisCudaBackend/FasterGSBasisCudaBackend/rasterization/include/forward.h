@@ -29,6 +29,7 @@ namespace faster_gs::rasterization {
         const float center_x,
         const float center_y,
         const float near_plane,
-        const float far_plane);
+        const float far_plane,
+        const cudaStream_t stream);
 
 }

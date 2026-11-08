@@ -37,7 +37,8 @@ void faster_gs::rasterization::backward(
     const float focal_x,
     const float focal_y,
     const float center_x,
-    const float center_y)
+    const float center_y,
+    const cudaStream_t stream)
 {
     const dim3 grid(div_round_up(width, config::tile_width), div_round_up(height, config::tile_height), 1);
     const dim3 block(config::tile_width, config::tile_height, 1);
@@ -49,7 +50,7 @@ void faster_gs::rasterization::backward(
     InstanceBuffers instance_buffers = InstanceBuffers::from_blob(instance_buffers_blob, n_instances, end_bit);
     instance_buffers.primitive_indices.selector = instance_primitive_indices_selector;
 
-    kernels::backward::blend_backward_cu<<<grid, block>>>(
+    kernels::backward::blend_backward_cu<<<grid, block, 0, stream>>>(
         tile_buffers.instance_ranges,
         instance_buffers.primitive_indices.Current(),
         primitive_buffers.mean2d,
@@ -70,7 +71,7 @@ void faster_gs::rasterization::backward(
     );
     CHECK_CUDA(config::debug, "blend_backward")
 
-    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward>>>(
+    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward, 0, stream>>>(
         means,
         scales,
         rotations,
