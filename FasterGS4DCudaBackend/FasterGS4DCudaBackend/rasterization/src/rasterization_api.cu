@@ -4,6 +4,8 @@
 #include "torch_utils.h"
 #include "rasterization_config.h"
 #include "helper_math.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <stdexcept>
 #include <functional>
 #include <tuple>
@@ -33,6 +35,8 @@ faster_gs::rasterization::forward_wrapper(
     const float far_plane,
     const float timestamp)
 {
+    const at::cuda::CUDAGuard device_guard(spatial_means.device());
+
     // all optimizable tensors must be passed as contiguous CUDA float tensors
     CHECK_INPUT(config::debug, spatial_means, "spatial_means");
     CHECK_INPUT(config::debug, temporal_means, "temporal_means");
@@ -87,7 +91,8 @@ faster_gs::rasterization::forward_wrapper(
         center_y,
         near_plane,
         far_plane,
-        timestamp
+        timestamp,
+        at::cuda::getCurrentCUDAStream()
     );
 
     return {
@@ -131,6 +136,8 @@ faster_gs::rasterization::backward_wrapper(
     const int n_buckets,
     const int instance_primitive_indices_selector)
 {
+    const at::cuda::CUDAGuard device_guard(spatial_means.device());
+
     const int n_primitives = spatial_means.size(0);
     const int total_sh_bases = sh_coefficients_rest.size(1);
     const torch::TensorOptions float_options = torch::TensorOptions().dtype(torch::kFloat).device(torch::kCUDA);
@@ -190,7 +197,8 @@ faster_gs::rasterization::backward_wrapper(
         focal_y,
         center_x,
         center_y,
-        timestamp
+        timestamp,
+        at::cuda::getCurrentCUDAStream()
     );
 
     return {grad_spatial_means, grad_temporal_means, grad_spatial_scales, grad_temporal_scales, grad_left_isoclinic_rotations, grad_right_isoclinic_rotations, grad_opacities, grad_sh_coefficients_0, grad_sh_coefficients_rest};

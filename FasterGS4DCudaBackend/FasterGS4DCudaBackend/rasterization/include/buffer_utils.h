@@ -71,8 +71,7 @@ namespace faster_gs::rasterization {
         float2* mean2d;
         float4* conic_opacity;
         float3* color;
-        uint* n_visible_primitives;
-        uint* n_instances;
+        uint2* counters;
 
         static PrimitiveBuffers from_blob(char*& blob, int n_primitives) {
             PrimitiveBuffers buffers;
@@ -107,8 +106,7 @@ namespace faster_gs::rasterization {
             );
             buffers.cub_workspace_size = max(buffers.cub_workspace_size, sorting_workspace_size);
             obtain(blob, buffers.cub_workspace, buffers.cub_workspace_size);
-            obtain(blob, buffers.n_visible_primitives, 1);
-            obtain(blob, buffers.n_instances, 1);
+            obtain(blob, buffers.counters, 1);
             return buffers;
         }
     };

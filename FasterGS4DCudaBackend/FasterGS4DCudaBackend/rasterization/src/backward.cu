@@ -47,7 +47,8 @@ void faster_gs::rasterization::backward(
     const float focal_y,
     const float center_x,
     const float center_y,
-    const float timestamp)
+    const float timestamp,
+    const cudaStream_t stream)
 {
     const dim3 grid(div_round_up(width, config::tile_width), div_round_up(height, config::tile_height), 1);
     const int n_tiles = grid.x * grid.y;
@@ -59,7 +60,7 @@ void faster_gs::rasterization::backward(
     BucketBuffers bucket_buffers = BucketBuffers::from_blob(bucket_buffers_blob, n_buckets);
     instance_buffers.primitive_indices.selector = instance_primitive_indices_selector;
 
-    kernels::backward::blend_backward_cu<<<n_buckets, 32>>>(
+    kernels::backward::blend_backward_cu<<<n_buckets, 32, 0, stream>>>(
         tile_buffers.instance_ranges,
         tile_buffers.buckets_offset,
         instance_buffers.primitive_indices.Current(),
@@ -81,11 +82,12 @@ void faster_gs::rasterization::backward(
         n_primitives,
         width,
         height,
-        grid.x
+        grid.x,
+        n_tiles
     );
     CHECK_CUDA(config::debug, "blend_backward")
 
-    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward>>>(
+    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward, 0, stream>>>(
         spatial_means,
         temporal_means,
         spatial_scales,
