@@ -46,7 +46,8 @@ void faster_gs::rasterization::backward(
     const float center_x,
     const float center_y,
     const bool use_fused_activations,
-    const bool use_per_gaussian_backward)
+    const bool use_per_gaussian_backward,
+    const cudaStream_t stream)
 {
     const dim3 grid(div_round_up(width, config::tile_width), div_round_up(height, config::tile_height), 1);
     const dim3 block(config::tile_width, config::tile_height, 1);
@@ -62,7 +63,7 @@ void faster_gs::rasterization::backward(
     instance_buffers.primitive_indices.selector = instance_primitive_indices_selector;
 
     if (use_per_gaussian_backward) {
-        kernels::backward::per_gaussian_blend_backward_cu<<<n_buckets, 32>>>(
+        kernels::backward::per_gaussian_blend_backward_cu<<<n_buckets, 32, 0, stream>>>(
             tile_buffers.instance_ranges,
             tile_buffers.buckets_offset,
             instance_buffers.primitive_indices.Current(),
@@ -86,12 +87,13 @@ void faster_gs::rasterization::backward(
             width,
             height,
             grid.x,
+            n_tiles,
             use_fused_activations
         );
         CHECK_CUDA(config::debug, "per_gaussian_blend_backward")
     }
     else {
-        kernels::backward::blend_backward_cu<<<grid, block>>>(
+        kernels::backward::blend_backward_cu<<<grid, block, 0, stream>>>(
             tile_buffers.instance_ranges,
             instance_buffers.primitive_indices.Current(),
             primitive_buffers.mean2d,
@@ -116,7 +118,7 @@ void faster_gs::rasterization::backward(
     }
 
     const bool concatenated_sh = sh_coefficients != nullptr;
-    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward>>>(
+    kernels::backward::preprocess_backward_cu<<<div_round_up(n_primitives, config::block_size_preprocess_backward), config::block_size_preprocess_backward, 0, stream>>>(
         means,
         scales,
         rotations,
@@ -187,7 +189,8 @@ template void faster_gs::rasterization::backward<true>(
     const float,
     const float,
     const bool,
-    const bool);
+    const bool,
+    const cudaStream_t);
 
 template void faster_gs::rasterization::backward<false>(
     const float*,
@@ -228,4 +231,5 @@ template void faster_gs::rasterization::backward<false>(
     const float,
     const float,
     const bool,
-    const bool);
+    const bool,
+    const cudaStream_t);

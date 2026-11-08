@@ -45,6 +45,7 @@ namespace faster_gs::rasterization {
         const float center_x,
         const float center_y,
         const bool use_fused_activations,
-        const bool use_per_gaussian_backward);
+        const bool use_per_gaussian_backward,
+        const cudaStream_t stream);
 
 }

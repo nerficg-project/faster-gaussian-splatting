@@ -38,7 +38,8 @@ namespace faster_gs::rasterization {
         const bool use_fused_activations,
         const bool use_load_balanced_instance_creation,
         const bool use_tile_based_culling,
-        const bool use_per_gaussian_backward);
+        const bool use_per_gaussian_backward,
+        const cudaStream_t stream);
 
     std::tuple<int, int, int> forward_separate_sorting(
         std::function<char* (size_t)> resize_primitive_buffers,
@@ -72,6 +73,7 @@ namespace faster_gs::rasterization {
         const bool use_fused_activations,
         const bool use_load_balanced_instance_creation,
         const bool use_tile_based_culling,
-        const bool use_per_gaussian_backward);
+        const bool use_per_gaussian_backward,
+        const cudaStream_t stream);
 
 }

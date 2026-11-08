@@ -4,6 +4,8 @@
 #include "torch_utils.h"
 #include "rasterization_config.h"
 #include "helper_math.h"
+#include <ATen/cuda/CUDAContext.h>
+#include <c10/cuda/CUDAGuard.h>
 #include <stdexcept>
 #include <functional>
 #include <tuple>
@@ -37,6 +39,8 @@ faster_gs::rasterization::forward_wrapper(
     const bool use_per_gaussian_backward,
     const bool use_separate_sorting)
 {
+    const at::cuda::CUDAGuard device_guard(means.device());
+
     // all optimizable tensors must be passed as contiguous CUDA float tensors
     CHECK_INPUT(config::debug, means, "means");
     CHECK_INPUT(config::debug, scales, "scales");
@@ -95,7 +99,8 @@ faster_gs::rasterization::forward_wrapper(
             use_fused_activations,
             use_load_balanced_instance_creation,
             use_tile_based_culling,
-            use_per_gaussian_backward
+            use_per_gaussian_backward,
+            at::cuda::getCurrentCUDAStream()
         );
     }
     else {
@@ -131,7 +136,8 @@ faster_gs::rasterization::forward_wrapper(
             use_fused_activations,
             use_load_balanced_instance_creation,
             use_tile_based_culling,
-            use_per_gaussian_backward
+            use_per_gaussian_backward,
+            at::cuda::getCurrentCUDAStream()
         );
     }
 
@@ -179,6 +185,8 @@ faster_gs::rasterization::backward_wrapper(
     const int n_buckets,
     const int instance_primitive_indices_selector)
 {
+    const at::cuda::CUDAGuard device_guard(means.device());
+
     const int n_primitives = means.size(0);
     const bool concatenated_sh = sh_coefficients.size(0) > 0;
     const int total_sh_bases = concatenated_sh ? sh_coefficients.size(1) : sh_coefficients_rest.size(1);
@@ -236,7 +244,8 @@ faster_gs::rasterization::backward_wrapper(
             center_x,
             center_y,
             use_fused_activations,
-            use_per_gaussian_backward
+            use_per_gaussian_backward,
+            at::cuda::getCurrentCUDAStream()
         );
     }
     else {
@@ -279,7 +288,8 @@ faster_gs::rasterization::backward_wrapper(
             center_x,
             center_y,
             use_fused_activations,
-            use_per_gaussian_backward
+            use_per_gaussian_backward,
+            at::cuda::getCurrentCUDAStream()
         );
     }
 
