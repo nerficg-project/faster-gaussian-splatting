@@ -2,8 +2,28 @@
 
 #include "densification_config.h"
 #include "helper_math.h"
-#include <curand_philox4x32_x.h>
 #include <cstdint>
+#include <cmath>
+
+#if defined(__HIP_PLATFORM_AMD__) || defined(USE_ROCM)
+#ifdef FGS_HAVE_HIPRAND_PHILOX4X32_10  // set by setup.py when hipRAND provides the function
+#include <hiprand/hiprand_kernel.h>
+#else
+// This hipRAND has no counterpart of curand_Philox4x32_10, so define the same
+// Philox4x32-10 bijection (Random123): ten rounds with the key bumped in between.
+__device__ inline uint4 curand_Philox4x32_10(uint4 counter, uint2 key) {
+    for (int round = 0; round < 10; round++) {
+        if (round > 0) key = make_uint2(key.x + 0x9E3779B9u, key.y + 0xBB67AE85u);
+        const uint hi0 = __umulhi(0xD2511F53u, counter.x);
+        const uint hi1 = __umulhi(0xCD9E8D57u, counter.z);
+        counter = make_uint4(hi1 ^ counter.y ^ key.x, 0xCD9E8D57u * counter.z, hi0 ^ counter.w ^ key.y, 0xD2511F53u * counter.x);
+    }
+    return counter;
+}
+#endif
+#else
+#include <curand_philox4x32_x.h>
+#endif
 
 namespace faster_gs::densification::kernels::mcmc {
 
@@ -17,7 +37,7 @@ namespace faster_gs::densification::kernels::mcmc {
             double binom = 1.0f;
             double sign = 1.0f;
             for (int k = 0; k <= n; k++, sign = -sign) {
-                const double coefficient = binom * sign * rsqrt(static_cast<double>(k + 1));
+                const double coefficient = binom * sign / std::sqrt(static_cast<double>(k + 1));
                 relocation_coefficients[n * config::mcmc_max_n_samples + k] = static_cast<float>(coefficient);
                 binom *= static_cast<double>(n - k) / static_cast<double>(k + 1);
             }

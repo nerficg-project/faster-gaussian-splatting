@@ -7,7 +7,26 @@
 #include "helper_math.h"
 #include "utils.h"
 #include <cooperative_groups.h>
+#if defined(__HIP_PLATFORM_AMD__) || defined(USE_ROCM)
+#if __has_include(<hip/cooperative_groups/hip_reduce.h>)
+#include <hip/cooperative_groups/hip_reduce.h>
+#else
+// HIP before 7.13 has no cooperative_groups::reduce; provide the tile-wide max reduction used below
+namespace cooperative_groups {
+    template <typename T> struct greater {
+        __device__ T operator()(const T& a, const T& b) const { return a < b ? b : a; }
+    };
+    template <unsigned int size, typename ParentCGTy, typename T, typename Op>
+    __device__ T reduce(const thread_block_tile<size, ParentCGTy>& tile, T value, Op op) {
+        #pragma unroll
+        for (unsigned int offset = size / 2; offset > 0; offset /= 2) value = op(value, tile.shfl_xor(value, offset));
+        return value;
+    }
+}
+#endif
+#else
 #include <cooperative_groups/reduce.h>
+#endif
 namespace cg = cooperative_groups;
 
 namespace faster_gs::rasterization::kernels::forward {

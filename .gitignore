@@ -10,6 +10,9 @@
 *.egg-info
 *.ipynb
 *.log
+*.hip
+*_hip.h
+*_hip.cuh
 !resources/*
 .vscode
 .DS_Store

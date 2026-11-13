@@ -5,6 +5,12 @@
 #include <cub/cub.cuh>
 #include <cstdint>
 
+// On ROCm, hipify maps cub::Device* to hipcub::Device* but does not alias
+// cub::DoubleBuffer. Provide a cub namespace alias so cub::DoubleBuffer works.
+#if defined(__HIP_PLATFORM_AMD__) || defined(USE_ROCM)
+namespace cub = hipcub;
+#endif
+
 namespace faster_gs::rasterization {
 
     inline __host__ int extract_end_bit(uint n) {

@@ -44,6 +44,12 @@
 
 #include "cuda_runtime.h"
 
+// HIP provides built-in vector type operators (float2/3/4 +,-,*,/,+=,-=,*=,/=).
+// On HIP we skip the operator definitions below to avoid ambiguous overloads.
+#if defined(__HIP_PLATFORM_AMD__) || defined(USE_ROCM)
+#define HELPER_MATH_SKIP_VECTOR_OPS
+#endif
+
 typedef unsigned int uint;
 typedef unsigned short ushort;
 
@@ -263,8 +269,11 @@ inline __host__ __device__ uint4 make_uint4(int4 a)
 }
 
 ////////////////////////////////////////////////////////////////////////////////
-// negate
+// negate, add, subtract, multiply, divide operators
+// HIP provides these for float2/3/4, int2/3/4, uint2/3/4 via HIP_vector_type.
 ////////////////////////////////////////////////////////////////////////////////
+
+#ifndef HELPER_MATH_SKIP_VECTOR_OPS
 
 inline __host__ __device__ float2 operator-(float2 &a)
 {
@@ -1055,6 +1064,8 @@ inline __host__ __device__ float4 operator/(float b, float4 a)
     return make_float4(b / a.x, b / a.y, b / a.z, b / a.w);
 }
 
+#endif // HELPER_MATH_SKIP_VECTOR_OPS
+
 ////////////////////////////////////////////////////////////////////////////////
 // min
 ////////////////////////////////////////////////////////////////////////////////
@@ -1222,12 +1233,26 @@ inline __host__ __device__ uint4 max(uint4 a, uint4 b)
 ////////////////////////////////////////////////////////////////////////////////
 // lerp
 // - linear interpolation between a and b, based on value t in [0, 1] range
+// C++20 adds std::lerp(float, float, float), which libstdc++ also injects into
+// the global namespace through <math.h>, so declaring a global scalar lerp
+// conflicts with it there; std::lerp in turn is not callable from device code
+// and is not visible unqualified with every standard library. lerp_scalar is
+// the scalar form device code calls: one definition, callable from both the
+// host and the device pass, independent of the standard library and of whether
+// the pass in progress is a device pass. The float2/float3/float4 overloads
+// take distinct parameter types and never conflict.
 ////////////////////////////////////////////////////////////////////////////////
 
-inline __device__ __host__ float lerp(float a, float b, float t)
+inline __device__ __host__ float lerp_scalar(float a, float b, float t)
 {
     return a + t*(b-a);
 }
+#if __cplusplus < 202002L
+inline __device__ __host__ float lerp(float a, float b, float t)
+{
+    return lerp_scalar(a, b, t);
+}
+#endif
 inline __device__ __host__ float2 lerp(float2 a, float2 b, float t)
 {
     return a + t*(b-a);

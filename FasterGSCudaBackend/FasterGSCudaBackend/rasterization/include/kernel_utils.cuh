@@ -96,8 +96,8 @@ namespace faster_gs::rasterization::kernels {
         if (not_in_y_range + not_in_x_range == 0.0f) return true;
         else {
             const float2 closest_corner = make_float2(
-                lerp(rect_max.x, rect_min.x, x_left),
-                lerp(rect_max.y, rect_min.y, y_above)
+                lerp_scalar(rect_max.x, rect_min.x, x_left),
+                lerp_scalar(rect_max.y, rect_min.y, y_above)
             );
 
             const float2 diff = mean - closest_corner;

@@ -54,6 +54,11 @@ Therefore, we tried to make it as easy as possible to integrate the most impactf
 ```shell
 pip install git+https://github.com/nerficg-project/faster-gaussian-splatting/#subdirectory=FasterGSCudaBackend --no-build-isolation
 ```
+On an AMD GPU, the same command builds the backend for ROCm, provided the environment already has a PyTorch build for ROCm.
+Set `PYTORCH_ROCM_ARCH` to the architecture of your GPU (e.g., `gfx90a`, `gfx1100`, `gfx1201`) to compile for a specific card:
+```shell
+PYTORCH_ROCM_ARCH=gfx1100 pip install git+https://github.com/nerficg-project/faster-gaussian-splatting/#subdirectory=FasterGSCudaBackend --no-build-isolation
+```
 Integrating the key features of this extension into the official 3DGS codebase (`graphdeco-inria/gaussian-splatting`) requires only minimal code changes.  
 A reference implementation is available [here](https://github.com/fhahlbohm/gaussian-splatting).
 
@@ -62,9 +67,10 @@ __That being said, we encourage you to give the native implementation a shot as 
 
 ### Requirements
 
-- An NVIDIA GPU
+- An NVIDIA GPU, or an AMD GPU supported by ROCm
 - Linux (preferred) or Windows
 - A recent CUDA SDK ([CUDA Toolkit 12.8](https://developer.nvidia.com/cuda-12-8-0-download-archive) recommended) and a compatible C++ compiler
+- On AMD GPUs: a recent [ROCm](https://rocm.docs.amd.com) installation (7.2 or newer recommended) and a PyTorch build for ROCm instead of the CUDA SDK; the Philox block function comes from hipRAND when the installed hipRAND provides `hiprand_Philox4x32_10`, otherwise from a bundled copy with identical output
 - [Anaconda / Miniconda](https://www.anaconda.com/docs/getting-started/miniconda/install) installed
 
 
